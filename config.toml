@@ -1,0 +1,20 @@
+[nas]
+mount_path = "/nas/inkwell"
+
+[schedule]
+cron = "0 3 * * *"
+
+[download]
+retry_attempts = 3
+retry_backoff = [5, 15, 45]
+timeout = 600
+inter_artist_cooldown = [30, 60]
+
+[cookies]
+expiry_warning_days = 30
+
+[auth]
+password_hash = ""
+
+[retention]
+log_days = 90

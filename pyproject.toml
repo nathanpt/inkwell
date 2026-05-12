@@ -1,0 +1,24 @@
+[project]
+name = "inkwell"
+version = "0.1.0"
+description = "Self-hosted media archiver for X.com artists"
+requires-python = ">=3.12"
+dependencies = [
+    "streamlit",
+    "apscheduler~=3.10",
+    "bcrypt",
+    "gallery-dl",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-mock",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

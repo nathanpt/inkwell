@@ -1,0 +1,17 @@
+services:
+  inkwell:
+    build: .
+    container_name: inkwell
+    ports:
+      - "8501:8501"
+    volumes:
+      - inkwell-data:/app/data
+      - ./config.toml:/app/config/config.toml:ro
+      - ./gallery-dl.conf:/app/config/gallery-dl.conf:ro
+      - /nas/inkwell:/nas/inkwell:rw
+    environment:
+      - INKWELL_PASSWORD=${INKWELL_PASSWORD}
+    restart: unless-stopped
+
+volumes:
+  inkwell-data:
