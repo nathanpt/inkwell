@@ -1,5 +1,5 @@
 [nas]
-mount_path = "/nas/inkwell"
+mount_path = "/mnt/tank/backups/inkwell"
 
 [schedule]
 cron = "0 3 * * *"
