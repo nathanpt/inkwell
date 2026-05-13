@@ -13,6 +13,8 @@ Self-hosted media archiver for artists on X.com, Pixiv, and DeviantArt. Download
 - Auth error detection with dashboard alerts
 - Runs as a single Docker container with a pre-built image (no build tools needed)
 
+<img width="1211" height="555" alt="image" src="https://github.com/user-attachments/assets/0e307bd0-22c2-450b-b6dd-fb5c843ea880" />
+
 ## Requirements
 
 - Docker + Docker Compose (v2)
