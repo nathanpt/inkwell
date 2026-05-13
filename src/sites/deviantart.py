@@ -38,6 +38,8 @@ class DeviantArtAdapter(SiteAdapter):
         return username, normalized_url
 
     def get_gallery_dl_config_path(self) -> Path:
+        if CONFIG_PATH.is_dir():
+            return Path(f"/app/defaults/{CONFIG_PATH.name}")
         return CONFIG_PATH
 
     def get_archive_db_path(self) -> Path:

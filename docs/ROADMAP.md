@@ -9,6 +9,7 @@
 
 ## Completed
 
+- [x] Fix concurrent SQLite writes from progress polling thread (use separate connection)
 - [x] Fix Docker Compose buildx warning (pre-built GHCR image + CI workflow)
 - [x] Adaptive scheduling when rate limits are frequent
 - [x] Download history with file count and bytes columns

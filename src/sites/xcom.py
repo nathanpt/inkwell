@@ -8,7 +8,7 @@ from src.models import Artist
 from src.sites.base import SiteAdapter
 
 X_COM_PATTERN = re.compile(
-    r"^https?://(x\.com|twitter\.com)/([a-zA-Z0-9_]{1,15})/?$"
+    r"^https?://(x\.com|twitter\.com)/([a-zA-Z0-9_]{1,15})(?:/(media|with_replies|tweets|highlights|likes))?/?$"
 )
 
 CONFIG_PATH = Path("/app/config/gallery-dl.xcom.conf")
@@ -34,10 +34,16 @@ class XComAdapter(SiteAdapter):
                 "Invalid URL. Must be https://x.com/{handle} or https://twitter.com/{handle}"
             )
         handle = match.group(2)
-        normalized_url = f"https://x.com/{handle}"
+        tab = match.group(3)
+        if tab:
+            normalized_url = f"https://x.com/{handle}/{tab}"
+        else:
+            normalized_url = f"https://x.com/{handle}"
         return handle, normalized_url
 
     def get_gallery_dl_config_path(self) -> Path:
+        if CONFIG_PATH.is_dir():
+            return Path(f"/app/defaults/{CONFIG_PATH.name}")
         return CONFIG_PATH
 
     def get_archive_db_path(self) -> Path:

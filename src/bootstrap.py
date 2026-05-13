@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 DATA_DIR = Path("/app/data")
 CONFIG_DIR = Path("/app/config")
+DEFAULTS_DIR = Path("/app/defaults")
 
 
 _bootstrap_done = False
@@ -24,13 +25,12 @@ def bootstrap(config_path: Path | None = None) -> tuple[sqlite3.Connection, Conf
 
     config_file = config_path or (CONFIG_DIR / "config.toml")
 
-    if config_file.is_dir():
-        raise RuntimeError(
-            f"{config_file} is a directory, not a file. "
-            "This usually happens when the host file doesn't exist — "
-            "Docker creates a directory at the bind mount point. "
-            "Copy config.toml from the repo to your host before starting the container."
-        )
+    if config_file.is_dir() or not config_file.exists():
+        # Docker created a directory because the bind-mounted file didn't exist,
+        # or the file is simply missing. Fall back to the defaults baked into
+        # the image. We can't replace the bind mount, so read from defaults.
+        logger.info("Config %s not available, using image defaults", config_file)
+        config_file = DEFAULTS_DIR / "config.toml"
 
     config = load_config(config_file)
 
@@ -90,7 +90,8 @@ def _verify_local_storage(data_dir: Path) -> None:
 def _verify_config_files() -> None:
     configs = list(CONFIG_DIR.glob("gallery-dl.*.conf"))
     if not configs:
+        configs = list(DEFAULTS_DIR.glob("gallery-dl.*.conf"))
+    if not configs:
         raise FileNotFoundError(
-            f"No gallery-dl site configs found in {CONFIG_DIR}. "
-            "Ensure at least one gallery-dl.<site>.conf is bind-mounted."
+            f"No gallery-dl site configs found in {CONFIG_DIR} or {DEFAULTS_DIR}."
         )

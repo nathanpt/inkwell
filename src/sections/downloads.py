@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 
 import pandas as pd
@@ -8,6 +9,26 @@ import streamlit as st
 from src import db
 from src.downloader import download_all, download_artist
 from src.url_validator import get_registry
+
+logger = logging.getLogger(__name__)
+
+
+def _run_in_thread(target, args):
+    import sqlite3
+    conn = args[0]
+
+    def wrapper():
+        try:
+            target(*args)
+        except Exception as e:
+            logger.exception("Background download thread crashed: %s", e)
+            try:
+                db.insert_log(conn, "ERROR", "downloader", f"Thread crashed: {e}")
+            except Exception:
+                pass
+    t = threading.Thread(target=wrapper, daemon=True)
+    t.start()
+    return t
 
 
 def render_downloads():
@@ -19,12 +40,7 @@ def render_downloads():
     col1, col2 = st.columns(2)
     with col1:
         if st.button("Download All Now"):
-            t = threading.Thread(
-                target=download_all,
-                args=(conn, config, registry, "manual"),
-                daemon=True,
-            )
-            t.start()
+            _run_in_thread(download_all, (conn, config, registry, "manual"))
             st.info("Download started in background. Refresh to see progress.")
     with col2:
         artists = db.get_active_artists(conn)
@@ -37,17 +53,26 @@ def render_downloads():
             )
             if st.button("Download Selected"):
                 artist = next(a for a in artists if a.id == selected[0])
-                t = threading.Thread(
-                    target=download_artist,
-                    args=(conn, artist, config, registry, "manual"),
-                    daemon=True,
-                )
-                t.start()
+                _run_in_thread(download_artist, (conn, artist, config, registry, "manual"))
                 st.info(f"Download started for {registry.get(artist.site).get_display_handle(artist)}")
 
     # Job history
     st.divider()
-    st.subheader("Job History")
+    col_header, col_clear = st.columns([4, 1])
+    with col_header:
+        st.subheader("Job History")
+    with col_clear:
+        running = db.get_jobs_by_status(conn, "running")
+        if running:
+            st.markdown(
+                '<meta http-equiv="refresh" content="10">',
+                unsafe_allow_html=True,
+            )
+            if st.button("Clear Stuck Jobs"):
+                cleaned = db.clean_orphaned_jobs(conn)
+                if cleaned:
+                    st.success(f"Cleared {cleaned} stuck job(s)")
+                    st.rerun()
 
     status_filter = st.selectbox(
         "Filter by status",
