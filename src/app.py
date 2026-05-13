@@ -19,6 +19,12 @@ def _init_session_state():
         st.session_state.conn = conn
         st.session_state.config = config
 
+        from src.scheduler import create_scheduler
+
+        scheduler = create_scheduler(conn, config)
+        scheduler.start()
+        st.session_state.scheduler = scheduler
+
 
 def _check_password(password: str) -> bool:
     config = st.session_state.config
