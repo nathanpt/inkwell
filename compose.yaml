@@ -11,7 +11,7 @@ services:
             - ./gallery-dl.xcom.conf:/app/config/gallery-dl.xcom.conf:ro # gallery-dl X.com config
             - ./gallery-dl.pixiv.conf:/app/config/gallery-dl.pixiv.conf:ro # gallery-dl Pixiv config
             - ./gallery-dl.deviantart.conf:/app/config/gallery-dl.deviantart.conf:ro # gallery-dl DeviantArt config
-            - /nas/inkwell:/nas/inkwell:rw # NAS media storage (change to match your mount)
+            - /mnt/tank/backups/inkwell:/nas/inkwell:rw # NAS media storage (change to match your mount)
         environment:
             - INKWELL_PASSWORD=${INKWELL_PASSWORD}
         restart: unless-stopped
