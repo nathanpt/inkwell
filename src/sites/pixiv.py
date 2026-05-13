@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import sqlite3
 from pathlib import Path
 
 from src.models import Artist
@@ -48,17 +47,17 @@ class PixivAdapter(SiteAdapter):
     def get_auth_files(self) -> list[Path]:
         return [TOKEN_PATH] if TOKEN_PATH.exists() else []
 
-    def is_auth_valid(self, conn: sqlite3.Connection) -> bool:
+    def is_auth_valid(self) -> bool:
         from src import db
-        return db.get_state(conn, AUTH_STATE_KEY) != "0"
+        return db.get_state(AUTH_STATE_KEY) != "0"
 
-    def mark_auth_invalid(self, conn: sqlite3.Connection) -> None:
+    def mark_auth_invalid(self) -> None:
         from src import db
-        db.set_state(conn, AUTH_STATE_KEY, "0")
+        db.set_state(AUTH_STATE_KEY, "0")
 
-    def mark_auth_valid(self, conn: sqlite3.Connection) -> None:
+    def mark_auth_valid(self) -> None:
         from src import db
-        db.set_state(conn, AUTH_STATE_KEY, "1")
+        db.set_state(AUTH_STATE_KEY, "1")
 
     def detect_auth_error(self, stderr: str) -> bool:
         lower = stderr.lower()

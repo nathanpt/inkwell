@@ -55,15 +55,15 @@ class TestSnapshotDirectory:
 class TestJobLock:
     def test_rejects_duplicate_running_job(self, db_conn, test_config, test_registry):
         artist = Artist(handle="test", site="x.com", source_url="https://x.com/test")
-        artist.id = db.insert_artist(db_conn, artist)
+        artist.id = db.insert_artist(artist)
 
         # Insert a running job manually
         job = Job(artist_id=artist.id, status="running", triggered_by="manual")
-        db.insert_job(db_conn, job)
+        db.insert_job(job)
 
         # Attempt to download same artist should return existing job
         with patch("src.downloader._run_gallery_dl"):
-            result = download_artist(db_conn, artist, test_config, test_registry)
+            result = download_artist(artist, test_config, test_registry)
         assert result.status == "running"
         # Should not have created a new job
         jobs = db_conn.execute("SELECT COUNT(*) FROM jobs WHERE artist_id = ?", (artist.id,)).fetchone()
@@ -73,7 +73,7 @@ class TestJobLock:
 class TestDownloadArtist:
     def test_success_records_metrics(self, db_conn, test_config, artist_dir, test_registry):
         artist = Artist(handle="testartist", site="x.com", source_url="https://x.com/testartist")
-        artist.id = db.insert_artist(db_conn, artist)
+        artist.id = db.insert_artist(artist)
 
         # Pre-create a file to show it's not counted
         (artist_dir / "old.jpg").write_bytes(b"x" * 50)
@@ -88,7 +88,7 @@ class TestDownloadArtist:
             return mock_result
 
         with patch("src.downloader._run_gallery_dl", side_effect=_mock_download):
-            job = download_artist(db_conn, artist, test_config, test_registry)
+            job = download_artist(artist, test_config, test_registry)
 
         assert job.status == "success"
         assert job.file_count == 1
@@ -96,21 +96,21 @@ class TestDownloadArtist:
 
     def test_auth_error_sets_state(self, db_conn, test_config, test_registry):
         artist = Artist(handle="locked", site="x.com", source_url="https://x.com/locked")
-        artist.id = db.insert_artist(db_conn, artist)
+        artist.id = db.insert_artist(artist)
 
         mock_result = MagicMock()
         mock_result.returncode = 1
         mock_result.stderr = "Error: login required"
 
         with patch("src.downloader._run_gallery_dl", return_value=mock_result):
-            job = download_artist(db_conn, artist, test_config, test_registry)
+            job = download_artist(artist, test_config, test_registry)
 
         assert job.status == "failed"
-        assert db.get_state(db_conn, "auth_valid:x.com") == "0"
+        assert db.get_state("auth_valid:x.com") == "0"
 
     def test_retries_on_transient_failure(self, db_conn, test_config, test_registry):
         artist = Artist(handle="flaky", site="x.com", source_url="https://x.com/flaky")
-        artist.id = db.insert_artist(db_conn, artist)
+        artist.id = db.insert_artist(artist)
 
         fail_result = MagicMock()
         fail_result.returncode = 1
@@ -121,7 +121,7 @@ class TestDownloadArtist:
         success_result.stderr = ""
 
         with patch("src.downloader._run_gallery_dl", side_effect=[fail_result, success_result]):
-            job = download_artist(db_conn, artist, test_config, test_registry)
+            job = download_artist(artist, test_config, test_registry)
 
         assert job.status == "success"
 
@@ -129,7 +129,7 @@ class TestDownloadArtist:
 class TestRateLimitDetection:
     def test_rate_limit_skips_retries(self, db_conn, test_config, test_registry):
         artist = Artist(handle="limited", site="x.com", source_url="https://x.com/limited")
-        artist.id = db.insert_artist(db_conn, artist)
+        artist.id = db.insert_artist(artist)
 
         mock_result = MagicMock()
         mock_result.returncode = 1
@@ -143,7 +143,7 @@ class TestRateLimitDetection:
             return mock_result
 
         with patch("src.downloader._run_gallery_dl", side_effect=_count_calls):
-            job = download_artist(db_conn, artist, test_config, test_registry)
+            job = download_artist(artist, test_config, test_registry)
 
         assert job.status == "failed"
         assert job.error_message == "Rate limited"
@@ -152,48 +152,48 @@ class TestRateLimitDetection:
 
     def test_rate_limit_records_hit(self, db_conn, test_config, test_registry):
         artist = Artist(handle="limited", site="x.com", source_url="https://x.com/limited")
-        artist.id = db.insert_artist(db_conn, artist)
+        artist.id = db.insert_artist(artist)
 
         mock_result = MagicMock()
         mock_result.returncode = 1
         mock_result.stderr = "429 Too Many Requests"
 
         with patch("src.downloader._run_gallery_dl", return_value=mock_result):
-            download_artist(db_conn, artist, test_config, test_registry)
+            download_artist(artist, test_config, test_registry)
 
         from src.rate_limiter import get_cooldown_multiplier
-        assert get_cooldown_multiplier(db_conn, "x.com") > 1.0
+        assert get_cooldown_multiplier("x.com") > 1.0
 
     def test_success_decays_multiplier(self, db_conn, test_config, test_registry):
         artist = Artist(handle="ok", site="x.com", source_url="https://x.com/ok")
-        artist.id = db.insert_artist(db_conn, artist)
+        artist.id = db.insert_artist(artist)
 
         # First, record a hit to bump the multiplier
         from src.rate_limiter import record_hit
-        record_hit(db_conn, "x.com", test_config.rate_limit)
+        record_hit("x.com", test_config.rate_limit)
 
         mock_result = MagicMock()
         mock_result.returncode = 0
         mock_result.stderr = ""
 
         with patch("src.downloader._run_gallery_dl", return_value=mock_result):
-            download_artist(db_conn, artist, test_config, test_registry)
+            download_artist(artist, test_config, test_registry)
 
         from src.rate_limiter import get_cooldown_multiplier
-        assert get_cooldown_multiplier(db_conn, "x.com") < test_config.rate_limit.multiplier_step
+        assert get_cooldown_multiplier("x.com") < test_config.rate_limit.multiplier_step
 
 
 class TestJobsWithArtistInfo:
     def test_returns_joined_data(self, db_conn):
         from src.models import Artist, Job
         artist = Artist(handle="testuser", site="x.com", source_url="https://x.com/testuser")
-        artist.id = db.insert_artist(db_conn, artist)
+        artist.id = db.insert_artist(artist)
 
         job = Job(artist_id=artist.id, status="running", triggered_by="manual")
-        job.id = db.insert_job(db_conn, job)
-        db.update_job_completion(db_conn, job.id, "success", 3, 1024)
+        job.id = db.insert_job(job)
+        db.update_job_completion(job.id, "success", 3, 1024)
 
-        rows = db.get_jobs_with_artist_info(db_conn)
+        rows = db.get_jobs_with_artist_info()
         assert len(rows) == 1
         r = rows[0]
         assert r["artist_handle"] == "testuser"
@@ -205,19 +205,19 @@ class TestJobsWithArtistInfo:
     def test_filters_by_status(self, db_conn):
         from src.models import Artist, Job
         artist = Artist(handle="a1", site="x.com", source_url="https://x.com/a1")
-        artist.id = db.insert_artist(db_conn, artist)
+        artist.id = db.insert_artist(artist)
 
-        db.insert_job(db_conn, Job(artist_id=artist.id, status="running", triggered_by="manual"))
+        db.insert_job(Job(artist_id=artist.id, status="running", triggered_by="manual"))
         job2 = Job(artist_id=artist.id, status="running", triggered_by="manual")
-        job2.id = db.insert_job(db_conn, job2)
-        db.update_job_completion(db_conn, job2.id, "failed", 0, 0, "err")
+        job2.id = db.insert_job(job2)
+        db.update_job_completion(job2.id, "failed", 0, 0, "err")
 
-        rows = db.get_jobs_with_artist_info(db_conn, status="failed")
+        rows = db.get_jobs_with_artist_info(status="failed")
         assert len(rows) == 1
         assert rows[0]["status"] == "failed"
 
     def test_empty_result(self, db_conn):
-        rows = db.get_jobs_with_artist_info(db_conn)
+        rows = db.get_jobs_with_artist_info()
         assert rows == []
 
 
@@ -227,22 +227,22 @@ class TestSitePause:
         test_registry.register(PixivAdapter())
 
         artist1 = Artist(handle="paused1", site="x.com", source_url="https://x.com/paused1")
-        artist1.id = db.insert_artist(db_conn, artist1)
+        artist1.id = db.insert_artist(artist1)
         artist2 = Artist(handle="ok2", site="pixiv", source_url="https://www.pixiv.net/users/111")
-        artist2.id = db.insert_artist(db_conn, artist2)
+        artist2.id = db.insert_artist(artist2)
 
         # Pause x.com by hitting it enough times to reach pause_threshold (6.0)
         # With step=1.5: 1.5 -> 2.25 -> 3.375 -> 5.0625 -> 7.59 (paused)
         from src.rate_limiter import record_hit
         for _ in range(5):
-            record_hit(db_conn, "x.com", test_config.rate_limit)
+            record_hit("x.com", test_config.rate_limit)
 
         mock_result = MagicMock()
         mock_result.returncode = 0
         mock_result.stderr = ""
 
         with patch("src.downloader._run_gallery_dl", return_value=mock_result):
-            jobs = download_all(db_conn, test_config, test_registry)
+            jobs = download_all(test_config, test_registry)
 
         # Only the pixiv artist should have been downloaded
         assert len(jobs) == 1

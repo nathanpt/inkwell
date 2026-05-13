@@ -6,8 +6,6 @@ from src import db
 
 
 def render_logs():
-    conn = db.get_connection(st.session_state.db_path)
-
     col1, col2 = st.columns(2)
     with col1:
         level_filter = st.selectbox(
@@ -26,7 +24,7 @@ def render_logs():
 
     level = None if level_filter == "All" else level_filter
     source = None if source_filter == "All" else source_filter
-    logs = db.get_logs(conn, level=level, source=source, limit=limit)
+    logs = db.get_logs(level=level, source=source, limit=limit)
 
     if not logs:
         st.info("No log entries.")

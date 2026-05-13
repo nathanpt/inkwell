@@ -12,7 +12,6 @@ from src.sites.deviantart import DeviantArtAdapter
 
 
 def render_settings():
-    conn = db.get_connection(st.session_state.db_path)
     config = st.session_state.config
 
     # Config display
@@ -30,22 +29,22 @@ Log retention: {config.retention.log_days} days
     st.divider()
     st.subheader("Site Authentication")
 
-    _render_xcom_auth(conn, config)
-    _render_pixiv_auth(conn, config)
-    _render_deviantart_auth(conn, config)
+    _render_xcom_auth()
+    _render_pixiv_auth()
+    _render_deviantart_auth()
 
 
-def _render_xcom_auth(conn, config):
+def _render_xcom_auth():
     adapter = XComAdapter()
     with st.expander("X.com", expanded=True):
         from src.sites.xcom import COOKIES_PATH
         _render_cookie_section(
-            conn, config, adapter, COOKIES_PATH,
+            adapter, COOKIES_PATH,
             label="X.com cookies.txt",
         )
 
 
-def _render_pixiv_auth(conn, config):
+def _render_pixiv_auth():
     adapter = PixivAdapter()
     with st.expander("Pixiv"):
         from src.sites.pixiv import TOKEN_PATH
@@ -60,22 +59,22 @@ def _render_pixiv_auth(conn, config):
         token = st.text_input("Pixiv refresh token", type="password", key="pixiv_token")
         if st.button("Save Pixiv Token", key="save_pixiv_token"):
             if token:
-                save_file(TOKEN_PATH, token.encode(), conn, adapter)
+                save_file(TOKEN_PATH, token.encode(), adapter)
                 st.success("Pixiv refresh token saved!")
                 st.rerun()
 
 
-def _render_deviantart_auth(conn, config):
+def _render_deviantart_auth():
     adapter = DeviantArtAdapter()
     with st.expander("DeviantArt"):
         from src.sites.deviantart import COOKIES_PATH as DA_COOKIES_PATH
         _render_cookie_section(
-            conn, config, adapter, DA_COOKIES_PATH,
+            adapter, DA_COOKIES_PATH,
             label="DeviantArt cookies.txt",
         )
 
 
-def _render_cookie_section(conn, config, adapter, path, label):
+def _render_cookie_section(adapter, path, label):
     info = get_file_info(path)
     if info["exists"]:
         import datetime
@@ -90,6 +89,6 @@ def _render_cookie_section(conn, config, adapter, path, label):
         key=f"upload_{adapter.name}",
     )
     if uploaded is not None:
-        save_file(path, uploaded.read(), conn, adapter)
+        save_file(path, uploaded.read(), adapter)
         st.success(f"{label} uploaded successfully!")
         st.rerun()

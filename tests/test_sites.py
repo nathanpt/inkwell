@@ -191,19 +191,19 @@ class TestSiteRegistry:
         pixiv = registry.get("pixiv")
 
         # X.com invalid, Pixiv valid
-        xcom.mark_auth_invalid(db_conn)
-        assert not xcom.is_auth_valid(db_conn)
-        assert pixiv.is_auth_valid(db_conn)
+        xcom.mark_auth_invalid()
+        assert not xcom.is_auth_valid()
+        assert pixiv.is_auth_valid()
 
         # Pixiv invalid independently
-        pixiv.mark_auth_invalid(db_conn)
-        assert not pixiv.is_auth_valid(db_conn)
+        pixiv.mark_auth_invalid()
+        assert not pixiv.is_auth_valid()
 
         # X.com still invalid
-        assert not xcom.is_auth_valid(db_conn)
+        assert not xcom.is_auth_valid()
 
         # Restore
-        xcom.mark_auth_valid(db_conn)
-        pixiv.mark_auth_valid(db_conn)
-        assert xcom.is_auth_valid(db_conn)
-        assert pixiv.is_auth_valid(db_conn)
+        xcom.mark_auth_valid()
+        pixiv.mark_auth_valid()
+        assert xcom.is_auth_valid()
+        assert pixiv.is_auth_valid()

@@ -18,7 +18,6 @@ logger = logging.getLogger(__name__)
 
 
 def download_artist(
-    conn: sqlite3.Connection,
     artist: Artist,
     config: Config,
     registry: SiteRegistry,
@@ -28,14 +27,14 @@ def download_artist(
     adapter = registry.get(artist.site)
 
     # Job lock: check for existing running job
-    existing = db.get_running_job_for_artist(conn, artist.id)
+    existing = db.get_running_job_for_artist(artist.id)
     if existing:
         logger.warning("Artist %s already has a running job (id=%d)", artist.handle, existing.id)
         return existing
 
     # Create job record
     job = Job(artist_id=artist.id, status="running", triggered_by=triggered_by)
-    job.id = db.insert_job(conn, job)
+    job.id = db.insert_job(job)
 
     # Snapshot directory before download
     artist_dir = Path(config.nas.mount_path) / artist.handle
@@ -45,12 +44,12 @@ def download_artist(
     last_error = None
     for attempt in range(config.download.retry_attempts):
         try:
-            db.insert_log(conn, "INFO", "downloader", f"Attempt {attempt + 1}/{config.download.retry_attempts} for {artist.handle}", job_id=job.id, artist_id=artist.id)
+            db.insert_log("INFO", "downloader", f"Attempt {attempt + 1}/{config.download.retry_attempts} for {artist.handle}", job_id=job.id, artist_id=artist.id)
             result = _run_gallery_dl(
                 source_url=artist.source_url,
                 config=config,
                 adapter=adapter,
-                progress_cb=lambda fc, tb: _update_job_progress(db.DEFAULT_DB_PATH, job.id, fc, tb),
+                progress_cb=lambda fc, tb: db.update_job_progress(job.id, fc, tb),
                 progress_before=before_snapshot,
                 progress_artist_dir=artist_dir,
             )
@@ -61,11 +60,11 @@ def download_artist(
 
             if result.returncode == 0:
                 db.update_job_completion(
-                    conn, job.id, "success", file_count, total_bytes
+                    job.id, "success", file_count, total_bytes
                 )
-                db.update_last_scan(conn, artist.id)
-                record_success(conn, artist.site, config.rate_limit)
-                db.insert_log(conn, "INFO", "downloader", f"Downloaded {file_count} file(s) for {artist.handle}", job_id=job.id, artist_id=artist.id)
+                db.update_last_scan(artist.id)
+                record_success(artist.site, config.rate_limit)
+                db.insert_log("INFO", "downloader", f"Downloaded {file_count} file(s) for {artist.handle}", job_id=job.id, artist_id=artist.id)
                 job.status = "success"
                 job.file_count = file_count
                 job.total_bytes = total_bytes
@@ -76,9 +75,9 @@ def download_artist(
 
             # Check rate-limit first
             if adapter.detect_rate_limit_error(stderr):
-                record_hit(conn, artist.site, config.rate_limit)
-                db.update_job_completion(conn, job.id, "failed", file_count, total_bytes, error_message="Rate limited by site")
-                db.insert_log(conn, "WARNING", "downloader", f"Rate limited for {artist.handle}, skipping retries", job_id=job.id, artist_id=artist.id)
+                record_hit(artist.site, config.rate_limit)
+                db.update_job_completion(job.id, "failed", file_count, total_bytes, error_message="Rate limited by site")
+                db.insert_log("WARNING", "downloader", f"Rate limited for {artist.handle}, skipping retries", job_id=job.id, artist_id=artist.id)
                 job.status = "failed"
                 job.error_message = "Rate limited"
                 job.file_count = file_count
@@ -86,9 +85,9 @@ def download_artist(
                 return job
 
             if adapter.detect_auth_error(stderr):
-                adapter.mark_auth_invalid(conn)
-                db.update_job_completion(conn, job.id, "failed", file_count, total_bytes, error_message="Auth error: credentials may be expired")
-                db.insert_log(conn, "ERROR", "downloader", f"Auth error for {artist.handle}: credentials invalid", job_id=job.id, artist_id=artist.id)
+                adapter.mark_auth_invalid()
+                db.update_job_completion(job.id, "failed", file_count, total_bytes, error_message="Auth error: credentials may be expired")
+                db.insert_log("ERROR", "downloader", f"Auth error for {artist.handle}: credentials invalid", job_id=job.id, artist_id=artist.id)
                 job.status = "failed"
                 job.error_message = "Auth error"
                 job.file_count = file_count
@@ -111,47 +110,46 @@ def download_artist(
                 delay,
                 last_error,
             )
-            db.insert_log(conn, "WARNING", "downloader", f"Retry {attempt + 1} for {artist.handle}: {last_error}", job_id=job.id, artist_id=artist.id)
+            db.insert_log("WARNING", "downloader", f"Retry {attempt + 1} for {artist.handle}: {last_error}", job_id=job.id, artist_id=artist.id)
             time.sleep(delay)
 
     # All retries exhausted
     # Final snapshot to capture any partial downloads
     after_snapshot = _snapshot_directory(artist_dir)
     file_count, total_bytes = _diff_snapshots(before_snapshot, after_snapshot)
-    db.update_job_completion(conn, job.id, "failed", file_count, total_bytes, error_message=last_error)
-    db.insert_log(conn, "ERROR", "downloader", f"All retries exhausted for {artist.handle}: {last_error}", job_id=job.id, artist_id=artist.id)
+    db.update_job_completion(job.id, "failed", file_count, total_bytes, error_message=last_error)
+    db.insert_log("ERROR", "downloader", f"All retries exhausted for {artist.handle}: {last_error}", job_id=job.id, artist_id=artist.id)
     job.status = "failed"
     job.error_message = last_error
     return job
 
 
 def download_all(
-    conn: sqlite3.Connection,
     config: Config,
     registry: SiteRegistry,
     triggered_by: str = "manual",
 ) -> list[Job]:
     """Download all active artists sequentially with NAS pre-flight check."""
-    artists = db.get_active_artists(conn)
+    artists = db.get_active_artists()
     if not artists:
         logger.info("No active artists to download")
         return []
 
     # NAS pre-flight check
     if not check_nas_with_retry(Path(config.nas.mount_path)):
-        db.insert_log(conn, "ERROR", "downloader", "NAS unavailable, aborting download run")
+        db.insert_log("ERROR", "downloader", "NAS unavailable, aborting download run")
         return []
 
     jobs: list[Job] = []
     for i, artist in enumerate(artists):
         # Check if site is paused due to rate limiting
-        if is_site_paused(conn, artist.site, config.rate_limit):
+        if is_site_paused(artist.site, config.rate_limit):
             logger.warning("Skipping %s — site %s is rate-limit paused", artist.handle, artist.site)
-            db.insert_log(conn, "WARNING", "downloader", f"Skipping {artist.handle}: site {artist.site} is rate-limit paused")
+            db.insert_log("WARNING", "downloader", f"Skipping {artist.handle}: site {artist.site} is rate-limit paused")
             continue
 
         logger.info("Downloading %s (%d/%d)", artist.handle, i + 1, len(artists))
-        job = download_artist(conn, artist, config, registry, triggered_by)
+        job = download_artist(artist, config, registry, triggered_by)
         jobs.append(job)
 
         # Inter-artist cooldown with jitter, scaled by rate-limit multiplier
@@ -160,26 +158,12 @@ def download_all(
                 config.download.inter_artist_cooldown[0],
                 config.download.inter_artist_cooldown[1],
             )
-            multiplier = get_cooldown_multiplier(conn, artist.site)
+            multiplier = get_cooldown_multiplier(artist.site)
             cooldown = int(base_cooldown * multiplier)
             logger.debug("Inter-artist cooldown: %ds (multiplier=%.1f)", cooldown, multiplier)
             time.sleep(cooldown)
 
     return jobs
-
-
-def _update_job_progress(
-    db_path: Path, job_id: int, file_count: int, total_bytes: int
-) -> None:
-    import sqlite3
-    conn = sqlite3.connect(str(db_path), check_same_thread=False)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute(
-        "UPDATE jobs SET file_count = ?, total_bytes = ? WHERE id = ?",
-        (file_count, total_bytes, job_id),
-    )
-    conn.commit()
-    conn.close()
 
 
 def _run_gallery_dl(

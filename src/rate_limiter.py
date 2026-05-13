@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 from dataclasses import dataclass
 
 from src import db
@@ -28,37 +27,37 @@ def _state_key(site: str) -> str:
     return f"rate_limit:{site}"
 
 
-def _load(conn: sqlite3.Connection, site: str) -> SiteRateState:
-    raw = db.get_state(conn, _state_key(site))
+def _load(site: str) -> SiteRateState:
+    raw = db.get_state(_state_key(site))
     if raw:
         data = json.loads(raw)
         return SiteRateState(**data)
     return SiteRateState()
 
 
-def _save(conn: sqlite3.Connection, site: str, state: SiteRateState) -> None:
-    db.set_state(conn, _state_key(site), json.dumps({
+def _save(site: str, state: SiteRateState) -> None:
+    db.set_state(_state_key(site), json.dumps({
         "hit_count": state.hit_count,
         "cooldown_multiplier": state.cooldown_multiplier,
     }))
 
 
-def record_hit(conn: sqlite3.Connection, site: str, config: RateLimitConfig) -> None:
-    state = _load(conn, site)
+def record_hit(site: str, config: RateLimitConfig) -> None:
+    state = _load(site)
     state.hit_count += 1
     state.cooldown_multiplier = min(
         state.cooldown_multiplier * config.multiplier_step,
         config.max_multiplier,
     )
-    _save(conn, site, state)
+    _save(site, state)
     logger.warning(
         "Rate limit hit for %s (count=%d, multiplier=%.1f)",
         site, state.hit_count, state.cooldown_multiplier,
     )
 
 
-def record_success(conn: sqlite3.Connection, site: str, config: RateLimitConfig) -> None:
-    state = _load(conn, site)
+def record_success(site: str, config: RateLimitConfig) -> None:
+    state = _load(site)
     if state.cooldown_multiplier <= 1.0:
         return
     state.cooldown_multiplier = max(
@@ -67,12 +66,12 @@ def record_success(conn: sqlite3.Connection, site: str, config: RateLimitConfig)
     )
     if state.cooldown_multiplier <= 1.0:
         state.hit_count = 0
-    _save(conn, site, state)
+    _save(site, state)
 
 
-def get_cooldown_multiplier(conn: sqlite3.Connection, site: str) -> float:
-    return _load(conn, site).cooldown_multiplier
+def get_cooldown_multiplier(site: str) -> float:
+    return _load(site).cooldown_multiplier
 
 
-def is_site_paused(conn: sqlite3.Connection, site: str, config: RateLimitConfig) -> bool:
-    return _load(conn, site).cooldown_multiplier >= config.pause_threshold
+def is_site_paused(site: str, config: RateLimitConfig) -> bool:
+    return _load(site).cooldown_multiplier >= config.pause_threshold

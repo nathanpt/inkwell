@@ -12,26 +12,23 @@ from src.url_validator import get_registry
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 
-def _get_conn() -> sqlite3.Connection:
-    """Return a fresh SQLite connection for the current thread."""
-    return db.get_connection(st.session_state.db_path)
-
-
 def _init_session_state():
     if "authenticated" not in st.session_state:
         st.session_state.authenticated = False
-    if "db_path" not in st.session_state:
+    if "bootstrapped" not in st.session_state:
         conn, config = bootstrap()
-        st.session_state.db_path = db.DEFAULT_DB_PATH
-        st.session_state.config = config
+        db.configure(db.DEFAULT_DB_PATH)
         conn.close()
+
+        st.session_state.config = config
+        st.session_state.bootstrapped = True
 
         # Initialize site registry
         get_registry()
 
         from src.scheduler import create_scheduler
 
-        scheduler = create_scheduler(st.session_state.db_path, config)
+        scheduler = create_scheduler(config)
         scheduler.start()
         st.session_state.scheduler = scheduler
 
@@ -58,14 +55,13 @@ def _render_login():
 
 
 def _render_auth_banner():
-    conn = _get_conn()
     config = st.session_state.config
     registry = get_registry()
 
     from src.cookie_manager import is_file_expired
 
     for adapter in registry.all_adapters():
-        if not adapter.is_auth_valid(conn):
+        if not adapter.is_auth_valid():
             st.error(f"**RE-AUTHENTICATE {adapter.name.upper()}** — Credentials are invalid. Upload fresh credentials in Settings.", icon="🚨")
         else:
             for auth_file in adapter.get_auth_files():

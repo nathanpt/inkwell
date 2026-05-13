@@ -19,7 +19,6 @@ SITE_LABELS = {
 
 
 def render_artists():
-    conn = db.get_connection(st.session_state.db_path)
     config = st.session_state.config
     registry = get_registry()
 
@@ -33,26 +32,23 @@ def render_artists():
         if submitted and url:
             try:
                 handle, normalized_url, adapter = validate_url(url)
-                existing = db.get_artist_by_url(conn, normalized_url)
+                existing = db.get_artist_by_url(normalized_url)
                 if existing and existing.is_active:
                     st.error(f"Artist {adapter.get_display_handle(Artist(handle=handle))} is already tracked")
                 elif existing and not existing.is_active:
-                    conn.execute(
-                        "UPDATE artists SET is_active = 1 WHERE id = ?", (existing.id,)
-                    )
-                    conn.commit()
+                    db.deactivate_artist(existing.id)
                     st.success(f"Reactivated {adapter.get_display_handle(Artist(handle=handle))}")
                     st.rerun()
                 else:
                     artist = Artist(handle=handle, site=adapter.name, source_url=normalized_url)
-                    db.insert_artist(conn, artist)
+                    db.insert_artist(artist)
                     st.success(f"Added {adapter.get_display_handle(Artist(handle=handle))} ({SITE_LABELS.get(adapter.name, adapter.name)})")
                     st.rerun()
             except ValueError as e:
                 st.error(str(e))
 
     # Artist list
-    artists = db.get_active_artists(conn)
+    artists = db.get_active_artists()
     if not artists:
         st.info("No artists tracked yet. Add one above.")
         return
@@ -79,12 +75,12 @@ def render_artists():
                 st.caption(f"{count:,} file(s) · {_format_bytes(size)}")
         with col3:
             if st.button("Remove", key=f"rm_{artist.id}"):
-                db.deactivate_artist(conn, artist.id)
+                db.deactivate_artist(artist.id)
                 st.success(f"Removed {display} from queue")
                 st.rerun()
 
             if st.button("Delete Files", key=f"del_{artist.id}"):
-                db.deactivate_artist(conn, artist.id)
+                db.deactivate_artist(artist.id)
                 artist_dir = Path(config.nas.mount_path) / artist.handle
                 if artist_dir.exists():
                     shutil.rmtree(artist_dir)

@@ -9,6 +9,7 @@
 
 ## Completed
 
+- [x] Refactor to connection-per-operation pattern (eliminate SQLite threading errors)
 - [x] Fix SQLite threading error — stop sharing connection across Streamlit threads
 - [x] Fix concurrent SQLite writes from progress polling thread (use separate connection)
 - [x] Fix Docker Compose buildx warning (pre-built GHCR image + CI workflow)

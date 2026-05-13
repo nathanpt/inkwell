@@ -26,10 +26,15 @@ def tmp_dir(tmp_path):
 
 @pytest.fixture
 def db_conn(tmp_path):
+    """Legacy fixture: provides a raw connection for tests that do direct SQL assertions."""
     db_path = tmp_path / "test_inkwell.db"
+    db.configure(db_path)
     conn = db.connect(db_path)
     db.init_schema(conn)
-    db.seed_state(conn)
+    conn.close()
+    db.seed_state()
+    # Re-open for direct SQL access in tests
+    conn = db.connect(db_path)
     yield conn
     conn.close()
 

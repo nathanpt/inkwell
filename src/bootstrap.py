@@ -42,17 +42,17 @@ def bootstrap(config_path: Path | None = None) -> tuple[sqlite3.Connection, Conf
     db.init_schema(conn)
 
     # 3. Seed state defaults
-    db.seed_state(conn)
+    db.seed_state()
 
     # 4. Clean orphaned jobs — only on first bootstrap in this process
     if not _bootstrap_done:
-        orphans = db.clean_orphaned_jobs(conn)
+        orphans = db.clean_orphaned_jobs()
         if orphans:
             logger.info("Cleaned %d orphaned job(s)", orphans)
         _bootstrap_done = True
 
     # 5. Prune old logs
-    pruned = db.prune_old_logs(conn, config.retention.log_days)
+    pruned = db.prune_old_logs(config.retention.log_days)
     if pruned:
         logger.info("Pruned %d old log entries", pruned)
 

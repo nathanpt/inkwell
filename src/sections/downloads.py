@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import threading
-from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -14,20 +13,17 @@ from src.url_validator import get_registry
 logger = logging.getLogger(__name__)
 
 
-def _run_in_thread(target, db_path: Path, config, registry, extra_args=None):
-    """Run target in a background thread with its own DB connection."""
+def _run_in_thread(target, extra_args=None):
+    """Run target in a background thread."""
     def wrapper():
-        conn = db.get_connection(db_path)
         try:
-            target(conn, *extra_args)
+            target(*extra_args)
         except Exception as e:
             logger.exception("Background download thread crashed: %s", e)
             try:
-                db.insert_log(conn, "ERROR", "downloader", f"Thread crashed: {e}")
+                db.insert_log("ERROR", "downloader", f"Thread crashed: {e}")
             except Exception:
                 pass
-        finally:
-            conn.close()
 
     t = threading.Thread(target=wrapper, daemon=True)
     t.start()
@@ -35,27 +31,17 @@ def _run_in_thread(target, db_path: Path, config, registry, extra_args=None):
 
 
 def render_downloads():
-    db_path = st.session_state.db_path
-    conn = db.get_connection(db_path)
     config = st.session_state.config
     registry = get_registry()
 
-    try:
-        _render_downloads_inner(conn, db_path, config, registry)
-    finally:
-        conn.close()
-
-
-def _render_downloads_inner(conn, db_path: Path, config, registry):
     # Download controls
     col1, col2 = st.columns(2)
     with col1:
         if st.button("Download All Now"):
-            _run_in_thread(download_all, db_path, config, registry,
-                          extra_args=(config, registry, "manual"))
+            _run_in_thread(download_all, extra_args=(config, registry, "manual"))
             st.info("Download started in background. Refresh to see progress.")
     with col2:
-        artists = db.get_active_artists(conn)
+        artists = db.get_active_artists()
         if artists:
             selected = st.selectbox(
                 "Single artist",
@@ -65,8 +51,7 @@ def _render_downloads_inner(conn, db_path: Path, config, registry):
             )
             if st.button("Download Selected"):
                 artist = next(a for a in artists if a.id == selected[0])
-                _run_in_thread(download_artist, db_path, config, registry,
-                              extra_args=(artist, config, registry, "manual"))
+                _run_in_thread(download_artist, extra_args=(artist, config, registry, "manual"))
                 st.info(f"Download started for {registry.get(artist.site).get_display_handle(artist)}")
 
     # Job history
@@ -75,14 +60,14 @@ def _render_downloads_inner(conn, db_path: Path, config, registry):
     with col_header:
         st.subheader("Job History")
     with col_clear:
-        running = db.get_jobs_by_status(conn, "running")
+        running = db.get_jobs_by_status("running")
         if running:
             st.markdown(
                 '<meta http-equiv="refresh" content="10">',
                 unsafe_allow_html=True,
             )
             if st.button("Clear Stuck Jobs"):
-                cleaned = db.clean_orphaned_jobs(conn)
+                cleaned = db.clean_orphaned_jobs()
                 if cleaned:
                     st.success(f"Cleared {cleaned} stuck job(s)")
                     st.rerun()
@@ -94,7 +79,6 @@ def _render_downloads_inner(conn, db_path: Path, config, registry):
     )
 
     rows = db.get_jobs_with_artist_info(
-        conn,
         status=None if status_filter == "All" else status_filter,
         limit=50,
     )

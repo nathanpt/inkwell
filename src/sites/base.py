@@ -3,8 +3,6 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from pathlib import Path
 
-import sqlite3
-
 from src.models import Artist
 
 
@@ -38,15 +36,15 @@ class SiteAdapter(ABC):
         ...
 
     @abstractmethod
-    def is_auth_valid(self, conn: sqlite3.Connection) -> bool:
+    def is_auth_valid(self) -> bool:
         ...
 
     @abstractmethod
-    def mark_auth_invalid(self, conn: sqlite3.Connection) -> None:
+    def mark_auth_invalid(self) -> None:
         ...
 
     @abstractmethod
-    def mark_auth_valid(self, conn: sqlite3.Connection) -> None:
+    def mark_auth_valid(self) -> None:
         ...
 
     @abstractmethod
