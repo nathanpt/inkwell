@@ -7,7 +7,7 @@ from src.models import Artist, Job
 
 DEFAULT_DB_PATH = Path("/app/data/inkwell.db")
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS artists (
@@ -177,6 +177,22 @@ def get_jobs_by_status(conn: sqlite3.Connection, status: str) -> list[Job]:
         "SELECT * FROM jobs WHERE status = ? ORDER BY started_at DESC", (status,)
     ).fetchall()
     return [_row_to_job(r) for r in rows]
+
+
+def get_jobs_with_artist_info(
+    conn: sqlite3.Connection, status: str | None = None, limit: int = 50
+) -> list[sqlite3.Row]:
+    query = (
+        "SELECT j.*, a.handle AS artist_handle, a.site AS artist_site "
+        "FROM jobs j JOIN artists a ON j.artist_id = a.id"
+    )
+    params: list = []
+    if status:
+        query += " WHERE j.status = ?"
+        params.append(status)
+    query += " ORDER BY j.started_at DESC LIMIT ?"
+    params.append(limit)
+    return conn.execute(query, params).fetchall()
 
 
 def clean_orphaned_jobs(conn: sqlite3.Connection) -> int:

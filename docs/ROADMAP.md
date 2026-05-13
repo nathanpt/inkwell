@@ -8,8 +8,8 @@
 
 - [ ] MkDocs + Material theme documentation site, deployed to GitHub Pages
 - [ ] Disk usage stats per artist in the dashboard
-- [ ] Download history with file count and bytes columns
-- [ ] Adaptive scheduling when rate limits are frequent
+- [x] Download history with file count and bytes columns
+- [x] Adaptive scheduling when rate limits are frequent
 
 ## Phase 5 — Multi-Site (Future)
 

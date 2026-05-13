@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 
+import pandas as pd
 import streamlit as st
 
 from src import db
@@ -54,39 +55,36 @@ def render_downloads():
         key="job_status_filter",
     )
 
-    if status_filter == "All":
-        jobs = db.get_recent_jobs(conn, limit=50)
-    else:
-        jobs = db.get_jobs_by_status(conn, status_filter)
+    rows = db.get_jobs_with_artist_info(
+        conn,
+        status=None if status_filter == "All" else status_filter,
+        limit=50,
+    )
 
-    if not jobs:
+    if not rows:
         st.info("No jobs yet.")
         return
 
-    for job in jobs:
-        artist_row = conn.execute(
-            "SELECT handle, site FROM artists WHERE id = ?", (job.artist_id,)
-        ).fetchone()
-        if artist_row:
-            from src.models import Artist
-            a = Artist(handle=artist_row["handle"], site=artist_row["site"])
-            try:
-                adapter = registry.get(a.site)
-                display = adapter.get_display_handle(a)
-            except ValueError:
-                display = a.handle
-        else:
-            display = "unknown"
-        status_emoji = {"success": "✅", "failed": "❌", "running": "⏳"}.get(job.status, "")
-        st.markdown(
-            f"{status_emoji} **{display}** — {job.status} | "
-            f"{job.file_count} file(s) | "
-            f"{_format_bytes(job.total_bytes)} | "
-            f"triggered: {job.triggered_by} | "
-            f"started: {job.started_at}"
-        )
-        if job.error_message:
-            st.caption(f"Error: {job.error_message}")
+    records = []
+    for r in rows:
+        artist = _display_handle(r["artist_handle"], r["artist_site"], registry)
+        records.append({
+            "Artist": artist,
+            "Status": r["status"],
+            "Files": r["file_count"],
+            "Size": _format_bytes(r["total_bytes"]),
+            "Triggered By": r["triggered_by"],
+            "Started": r["started_at"],
+        })
+
+    df = pd.DataFrame(records)
+    st.dataframe(df, use_container_width=True, hide_index=True)
+
+    # Show errors for failed jobs
+    failed = [r for r in rows if r["status"] == "failed" and r["error_message"]]
+    for r in failed:
+        artist = _display_handle(r["artist_handle"], r["artist_site"], registry)
+        st.caption(f"Error ({artist}): {r['error_message']}")
 
 
 def _artist_label(artist, registry) -> str:
@@ -96,6 +94,14 @@ def _artist_label(artist, registry) -> str:
         return adapter.get_display_handle(artist)
     except ValueError:
         return artist.handle
+
+
+def _display_handle(handle: str, site: str, registry) -> str:
+    from src.models import Artist
+    try:
+        return registry.get(site).get_display_handle(Artist(handle=handle))
+    except ValueError:
+        return handle
 
 
 def _format_bytes(n: int) -> str:

@@ -41,6 +41,14 @@ class RetentionConfig:
 
 
 @dataclass
+class RateLimitConfig:
+    multiplier_step: float = 1.5
+    max_multiplier: float = 8.0
+    pause_threshold: float = 6.0
+    decay_rate: float = 0.5
+
+
+@dataclass
 class SiteConfig:
     cooldown: list[int] = field(default_factory=lambda: [30, 60])
 
@@ -53,6 +61,7 @@ class Config:
     cookies: CookiesConfig = field(default_factory=CookiesConfig)
     auth: AuthConfig = field(default_factory=AuthConfig)
     retention: RetentionConfig = field(default_factory=RetentionConfig)
+    rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
     sites: dict[str, SiteConfig] = field(default_factory=dict)
 
 
@@ -69,5 +78,6 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
         cookies=CookiesConfig(**raw.get("cookies", {})),
         auth=AuthConfig(**raw.get("auth", {})),
         retention=RetentionConfig(**raw.get("retention", {})),
+        rate_limit=RateLimitConfig(**raw.get("rate_limit", {})),
         sites=sites,
     )

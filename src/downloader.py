@@ -11,6 +11,7 @@ from src import db
 from src.config_loader import Config
 from src.models import Artist, Job
 from src.nas_monitor import check_nas_with_retry
+from src.rate_limiter import record_hit, record_success, is_site_paused, get_cooldown_multiplier
 from src.sites.base import SiteAdapter, SiteRegistry
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,7 @@ def download_artist(
                     conn, job.id, "success", file_count, total_bytes
                 )
                 db.update_last_scan(conn, artist.id)
+                record_success(conn, artist.site, config.rate_limit)
                 db.insert_log(conn, "INFO", "downloader", f"Downloaded {file_count} file(s) for {artist.handle}", job_id=job.id, artist_id=artist.id)
                 job.status = "success"
                 job.file_count = file_count
@@ -62,6 +64,16 @@ def download_artist(
 
             # Non-zero exit — categorize error
             stderr = result.stderr or ""
+
+            # Check rate-limit first
+            if adapter.detect_rate_limit_error(stderr):
+                record_hit(conn, artist.site, config.rate_limit)
+                db.update_job_completion(conn, job.id, "failed", 0, 0, error_message="Rate limited by site")
+                db.insert_log(conn, "WARNING", "downloader", f"Rate limited for {artist.handle}, skipping retries", job_id=job.id, artist_id=artist.id)
+                job.status = "failed"
+                job.error_message = "Rate limited"
+                return job
+
             if adapter.detect_auth_error(stderr):
                 adapter.mark_auth_invalid(conn)
                 db.update_job_completion(conn, job.id, "failed", 0, 0, error_message="Auth error: credentials may be expired")
@@ -116,17 +128,25 @@ def download_all(
 
     jobs: list[Job] = []
     for i, artist in enumerate(artists):
+        # Check if site is paused due to rate limiting
+        if is_site_paused(conn, artist.site, config.rate_limit):
+            logger.warning("Skipping %s — site %s is rate-limit paused", artist.handle, artist.site)
+            db.insert_log(conn, "WARNING", "downloader", f"Skipping {artist.handle}: site {artist.site} is rate-limit paused")
+            continue
+
         logger.info("Downloading %s (%d/%d)", artist.handle, i + 1, len(artists))
         job = download_artist(conn, artist, config, registry, triggered_by)
         jobs.append(job)
 
-        # Inter-artist cooldown with jitter
+        # Inter-artist cooldown with jitter, scaled by rate-limit multiplier
         if i < len(artists) - 1:
-            cooldown = random.randint(
+            base_cooldown = random.randint(
                 config.download.inter_artist_cooldown[0],
                 config.download.inter_artist_cooldown[1],
             )
-            logger.debug("Inter-artist cooldown: %ds", cooldown)
+            multiplier = get_cooldown_multiplier(conn, artist.site)
+            cooldown = int(base_cooldown * multiplier)
+            logger.debug("Inter-artist cooldown: %ds (multiplier=%.1f)", cooldown, multiplier)
             time.sleep(cooldown)
 
     return jobs

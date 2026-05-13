@@ -54,6 +54,10 @@ class SiteAdapter(ABC):
         ...
 
     @abstractmethod
+    def detect_rate_limit_error(self, stderr: str) -> bool:
+        ...
+
+    @abstractmethod
     def get_display_handle(self, artist: Artist) -> str:
         ...
 

@@ -62,5 +62,9 @@ class XComAdapter(SiteAdapter):
         lower = stderr.lower()
         return "login" in lower or "unauthorized" in lower or "401" in lower
 
+    def detect_rate_limit_error(self, stderr: str) -> bool:
+        lower = stderr.lower()
+        return "429" in lower or "rate limit" in lower
+
     def get_display_handle(self, artist: Artist) -> str:
         return f"@{artist.handle}"

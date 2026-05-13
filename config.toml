@@ -19,6 +19,12 @@ password_hash = ""
 [retention]
 log_days = 90
 
+[rate_limit]
+multiplier_step = 1.5
+max_multiplier = 8.0
+pause_threshold = 6.0
+decay_rate = 0.5
+
 [sites.xcom]
 cooldown = [30, 60]
 

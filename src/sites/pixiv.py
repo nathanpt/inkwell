@@ -60,7 +60,11 @@ class PixivAdapter(SiteAdapter):
 
     def detect_auth_error(self, stderr: str) -> bool:
         lower = stderr.lower()
-        return "rate limit" in lower or "token" in lower or "refresh" in lower
+        return "token" in lower or "refresh" in lower
+
+    def detect_rate_limit_error(self, stderr: str) -> bool:
+        lower = stderr.lower()
+        return "429" in lower or "rate limit" in lower
 
     def get_display_handle(self, artist: Artist) -> str:
         return f"#{artist.handle}"

@@ -55,6 +55,12 @@ class TestXComAdapter:
         assert self.adapter.detect_auth_error("401 Unauthorized")
         assert not self.adapter.detect_auth_error("network timeout")
 
+    def test_detect_rate_limit_error(self):
+        assert self.adapter.detect_rate_limit_error("429 Too Many Requests")
+        assert self.adapter.detect_rate_limit_error("rate limit exceeded")
+        assert not self.adapter.detect_rate_limit_error("login required")
+        assert not self.adapter.detect_rate_limit_error("network timeout")
+
     def test_display_handle(self):
         assert self.adapter.get_display_handle(Artist(handle="artist")) == "@artist"
 
@@ -92,9 +98,15 @@ class TestPixivAdapter:
             self.adapter.parse_url("https://pixiv.net/artworks/12345")
 
     def test_detect_auth_error(self):
-        assert self.adapter.detect_auth_error("rate limit exceeded")
         assert self.adapter.detect_auth_error("token expired")
+        assert self.adapter.detect_auth_error("refresh token invalid")
         assert not self.adapter.detect_auth_error("network timeout")
+
+    def test_detect_rate_limit_error(self):
+        assert self.adapter.detect_rate_limit_error("429 Too Many Requests")
+        assert self.adapter.detect_rate_limit_error("rate limit exceeded")
+        assert not self.adapter.detect_rate_limit_error("token expired")
+        assert not self.adapter.detect_rate_limit_error("network timeout")
 
     def test_display_handle(self):
         assert self.adapter.get_display_handle(Artist(handle="12345")) == "#12345"
@@ -132,6 +144,12 @@ class TestDeviantArtAdapter:
         assert self.adapter.detect_auth_error("401 Unauthorized")
         assert self.adapter.detect_auth_error("Forbidden access")
         assert not self.adapter.detect_auth_error("network timeout")
+
+    def test_detect_rate_limit_error(self):
+        assert self.adapter.detect_rate_limit_error("429 Too Many Requests")
+        assert self.adapter.detect_rate_limit_error("rate limit exceeded")
+        assert not self.adapter.detect_rate_limit_error("Forbidden access")
+        assert not self.adapter.detect_rate_limit_error("network timeout")
 
     def test_display_handle(self):
         assert self.adapter.get_display_handle(Artist(handle="username")) == "username"
