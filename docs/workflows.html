@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Inkwell — Workflow Diagram</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%;overflow:hidden}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;background:#0f172a;color:#e2e8f0}
+
+.layout{display:flex;height:100%}
+
+/* Sidebar */
+.sidebar{width:270px;background:#1e293b;border-right:1px solid #334155;display:flex;flex-direction:column;flex-shrink:0}
+.sidebar-header{padding:20px;border-bottom:1px solid #334155}
+.sidebar-header h1{font-size:18px;font-weight:700;color:#f8fafc;letter-spacing:-0.02em}
+.sidebar-header p{font-size:12px;color:#64748b;margin-top:2px}
+.flow-list{flex:1;overflow-y:auto;padding:10px}
+.flow-btn{display:block;width:100%;padding:9px 13px;margin-bottom:4px;background:transparent;border:1px solid #334155;border-radius:8px;color:#cbd5e1;font-size:13px;text-align:left;cursor:pointer;transition:all .2s;font-family:inherit}
+.flow-btn:hover{background:#334155;color:#f8fafc}
+.flow-btn.active{background:#3b82f6;border-color:#3b82f6;color:#fff;font-weight:500}
+.clear-btn{margin:10px;padding:8px;background:transparent;border:1px solid #475569;border-radius:6px;color:#94a3b8;cursor:pointer;font-size:12px;font-family:inherit;transition:all .2s}
+.clear-btn:hover{background:#334155;color:#f8fafc}
+
+/* Main */
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}
+
+/* Legend */
+.legend{display:flex;gap:16px;padding:8px 20px;background:#1e293b;border-bottom:1px solid #334155;font-size:11px;flex-wrap:wrap;align-items:center}
+.legend-item{display:flex;align-items:center;gap:5px;color:#94a3b8}
+.legend-dot{width:10px;height:10px;border-radius:3px}
+
+/* Graph */
+.graph-wrapper{flex:1;overflow:auto;position:relative}
+.graph-container{position:relative;width:1300px;height:700px;margin:16px auto}
+.graph-container svg{position:absolute;top:0;left:0;pointer-events:none;z-index:1}
+
+/* Nodes */
+.node{position:absolute;padding:8px 14px;border-radius:8px;border:2px solid #475569;background:#1e293b;font-size:12px;font-weight:500;white-space:nowrap;transform:translate(-50%,-50%);cursor:default;transition:all .3s ease;z-index:2;text-align:center;line-height:1.4}
+.node .sub{font-size:10px;color:#64748b;font-weight:400}
+.node.active{transform:translate(-50%,-50%) scale(1.06)}
+.node.dimmed{opacity:.2}
+
+.node[data-cat="ui"]{border-color:#3b82f680}.node[data-cat="ui"].active{border-color:#60a5fa;box-shadow:0 0 24px #3b82f640}
+.node[data-cat="core"]{border-color:#14b8a680}.node[data-cat="core"].active{border-color:#5eead4;box-shadow:0 0 24px #14b8a640}
+.node[data-cat="infra"]{border-color:#f59e0b80}.node[data-cat="infra"].active{border-color:#fbbf24;box-shadow:0 0 24px #f59e0b40}
+.node[data-cat="adapter"]{border-color:#f9731680}.node[data-cat="adapter"].active{border-color:#fb923c;box-shadow:0 0 24px #f9731640}
+.node[data-cat="data"]{border-color:#a855f780}.node[data-cat="data"].active{border-color:#c084fc;box-shadow:0 0 24px #a855f740}
+.node[data-cat="external"]{border-color:#ef444480}.node[data-cat="external"].active{border-color:#f87171;box-shadow:0 0 24px #ef444440}
+
+/* SVG paths */
+@keyframes dash{to{stroke-dashoffset:-20}}
+.flow-path{fill:none;stroke:#60a5fa;stroke-width:2;opacity:0;transition:opacity .3s}
+.flow-path.active{opacity:1;stroke-dasharray:8 4;animation:dash .8s linear infinite}
+.flow-path-bg{fill:none;stroke:#0f172a;stroke-width:6;opacity:0;transition:opacity .3s}
+.flow-path-bg.active{opacity:1}
+
+/* SVG labels */
+.step-circle{opacity:0;transition:opacity .3s}
+.step-circle.active{opacity:1}
+.flow-text{font-size:9.5px;fill:#cbd5e1;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;paint-order:stroke;stroke:#0f172a;stroke-width:4;stroke-linejoin:round;opacity:0;transition:opacity .3s}
+.flow-text.active{opacity:1}
+.step-num-text{font-size:9px;font-weight:700;fill:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;text-anchor:middle;dominant-baseline:central}
+
+/* Info panel */
+.info-panel{height:190px;background:#1e293b;border-top:1px solid #334155;overflow:hidden;display:flex;flex-direction:column}
+.info-content{flex:1;overflow-y:auto;padding:14px 20px}
+.info-header h3{font-size:15px;color:#f8fafc;font-weight:600}
+.info-header .desc{font-size:12px;color:#94a3b8;margin-top:3px}
+.info-header{margin-bottom:10px}
+.hint{color:#64748b;font-size:13px;padding:14px 20px}
+.steps-scroll{display:flex;gap:10px;overflow-x:auto;padding-bottom:8px}
+.step-card{flex-shrink:0;padding:8px 12px;background:#0f172a;border-radius:6px;border-left:3px solid #3b82f6;min-width:180px;max-width:260px}
+.step-card .sc-num{font-size:10px;font-weight:700;color:#3b82f6;margin-bottom:2px}
+.step-card .sc-label{font-size:11px;color:#e2e8f0;font-weight:500;font-family:'SF Mono',SFMono-Regular,Consolas,'Liberation Mono',Menlo,monospace}
+.step-card .sc-detail{font-size:10px;color:#64748b;margin-top:3px;line-height:1.3}
+</style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <h1>Inkwell</h1>
+      <p>Workflow Diagram</p>
+    </div>
+    <div id="flow-list" class="flow-list"></div>
+    <button class="clear-btn" id="clear-btn">Clear Selection</button>
+  </aside>
+  <div class="main">
+    <div class="legend" id="legend"></div>
+    <div class="graph-wrapper">
+      <div class="graph-container" id="graph">
+        <svg id="svg" width="1300" height="700"></svg>
+        <div id="nodes"></div>
+      </div>
+    </div>
+    <div class="info-panel" id="info-panel">
+      <p class="hint" id="hint">Select a workflow from the sidebar to visualize the data flow between components.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+const NW = 140, NH = 46;
+
+const CATEGORIES = {
+  ui:       { label: "UI Layer",        color: "#3b82f6" },
+  core:     { label: "Core Services",   color: "#14b8a6" },
+  infra:    { label: "Infrastructure",  color: "#f59e0b" },
+  adapter:  { label: "Site Adapters",   color: "#f97316" },
+  data:     { label: "Data Layer",      color: "#a855f7" },
+  external: { label: "External",        color: "#ef4444" },
+};
+
+const NODES = [
+  // Row 0: Entry
+  { id:"app",          label:"Streamlit App",   sub:"app.py",              cat:"ui",       x:650,  y:35 },
+  // Row 1: UI Sections
+  { id:"artists",      label:"Artists",         sub:"sections/artists.py", cat:"ui",       x:190,  y:130 },
+  { id:"downloads",    label:"Downloads",       sub:"sections/downloads.py",cat:"ui",      x:470,  y:130 },
+  { id:"settings",     label:"Settings",        sub:"sections/settings.py",cat:"ui",       x:750,  y:130 },
+  { id:"logs-sec",     label:"Logs",            sub:"sections/logs.py",    cat:"ui",       x:1040, y:130 },
+  // Row 2: Core
+  { id:"bootstrap",    label:"Bootstrap",       sub:"bootstrap.py",        cat:"core",     x:110,  y:260 },
+  { id:"downloader",   label:"Downloader",      sub:"downloader.py",       cat:"core",     x:390,  y:260 },
+  { id:"scheduler",    label:"Scheduler",       sub:"scheduler.py",        cat:"core",     x:610,  y:260 },
+  { id:"url-validator",label:"URL Validator",   sub:"url_validator.py",    cat:"core",     x:830,  y:260 },
+  { id:"cookie-mgr",   label:"Cookie Manager",  sub:"cookie_manager.py",   cat:"core",     x:1100, y:260 },
+  // Row 3: Infra
+  { id:"rate-limiter", label:"Rate Limiter",    sub:"rate_limiter.py",     cat:"infra",    x:190,  y:390 },
+  { id:"nas-monitor",  label:"NAS Monitor",     sub:"nas_monitor.py",      cat:"infra",    x:470,  y:390 },
+  { id:"models",       label:"Models",          sub:"models.py",           cat:"infra",    x:750,  y:390 },
+  { id:"site-registry",label:"Site Registry",   sub:"sites/base.py",       cat:"infra",    x:1040, y:390 },
+  // Row 4: Adapters
+  { id:"xcom",         label:"XCom Adapter",    sub:"sites/xcom.py",       cat:"adapter",  x:330,  y:510 },
+  { id:"pixiv",        label:"Pixiv Adapter",   sub:"sites/pixiv.py",      cat:"adapter",  x:610,  y:510 },
+  { id:"deviantart",   label:"DeviantArt Adapter",sub:"sites/deviantart.py",cat:"adapter",  x:890,  y:510 },
+  // Row 5: Data / External
+  { id:"config-loader",label:"Config Loader",   sub:"config_loader.py",    cat:"data",     x:150,  y:640 },
+  { id:"database",     label:"Database",        sub:"db.py",               cat:"data",     x:430,  y:640 },
+  { id:"gallery-dl",   label:"gallery-dl",      sub:"subprocess",          cat:"external", x:710,  y:640 },
+  { id:"nas-storage",  label:"NAS Storage",     sub:"/nas/inkwell/",       cat:"external", x:990,  y:640 },
+];
+
+const FLOWS = [
+  {
+    id: "startup",
+    name: "App Startup",
+    desc: "Streamlit initializes the app on first session: loads config, inits database, starts the cron scheduler, and registers site adapters.",
+    steps: [
+      { from:"app", to:"bootstrap", label:"bootstrap()", detail:"Triggers bootstrap on first Streamlit session" },
+      { from:"bootstrap", to:"config-loader", label:"load_config()", detail:"Reads and parses config.toml into Config dataclass" },
+      { from:"bootstrap", to:"database", label:"init_schema() · seed_state() · clean_orphans() · prune_logs()", detail:"Creates tables, seeds defaults, cleans stale jobs from restarts, prunes old log entries" },
+      { from:"app", to:"scheduler", label:"create_scheduler(config)", detail:"Configures APScheduler with cron trigger from config (default: 3 AM daily)" },
+      { from:"app", to:"url-validator", label:"get_registry()", detail:"Initializes SiteRegistry with XCom, Pixiv, and DeviantArt adapters" },
+    ]
+  },
+  {
+    id: "login",
+    name: "Login / Authentication",
+    desc: "User authenticates with a password. Bypassed if no password hash is set in config.",
+    steps: [
+      { from:"app", to:"config-loader", label:"password_hash", detail:"Reads bcrypt hash from config.toml" },
+      { from:"app", to:"app", label:"bcrypt.checkpw()", detail:"Compares entered password against stored hash; sets session_state.authenticated" },
+    ]
+  },
+  {
+    id: "add-artist",
+    name: "Add Artist",
+    desc: "User submits an artist URL. The URL is validated against site adapters, parsed into a handle, and stored in the database.",
+    steps: [
+      { from:"artists", to:"url-validator", label:"validate_url(url)", detail:"Validates URL against all registered site adapters" },
+      { from:"url-validator", to:"site-registry", label:"match_url(url)", detail:"Finds the adapter whose URL pattern matches" },
+      { from:"site-registry", to:"url-validator", label:"parse_url(url) → handle, normalized_url", detail:"Adapter extracts handle and normalizes the URL" },
+      { from:"artists", to:"database", label:"get_artist_by_url() → insert_artist()", detail:"Checks for duplicates then creates the artist record" },
+    ]
+  },
+  {
+    id: "remove-artist",
+    name: "Remove Artist",
+    desc: "Deactivates an artist from the download queue. Optionally deletes their downloaded files from NAS.",
+    steps: [
+      { from:"artists", to:"database", label:"deactivate_artist(id)", detail:"Sets is_active=0 to remove from download queue" },
+      { from:"artists", to:"nas-storage", label:"shutil.rmtree() [optional]", detail:"User can choose to delete the artist directory and all media files" },
+    ]
+  },
+  {
+    id: "download-single",
+    name: "Download Single Artist",
+    desc: "Downloads media for one artist via gallery-dl subprocess with retries, progress tracking, and error categorization.",
+    steps: [
+      { from:"downloads", to:"downloader", label:"download_artist(artist, config, registry)", detail:"Launches download in a background thread" },
+      { from:"downloader", to:"database", label:"get_running_job_for_artist()", detail:"Job lock: prevents duplicate concurrent downloads" },
+      { from:"downloader", to:"database", label:"insert_job(status='running')", detail:"Creates a new job record for tracking" },
+      { from:"downloader", to:"site-registry", label:"registry.get(artist.site)", detail:"Resolves the site-specific adapter for config and auth" },
+      { from:"downloader", to:"nas-storage", label:"_snapshot_directory() [before]", detail:"Walks artist directory to record existing files for later diffing" },
+      { from:"downloader", to:"gallery-dl", label:"subprocess.Popen(cmd)", detail:"Invokes gallery-dl with adapter config, cookies/token, archive DB, and destination" },
+      { from:"gallery-dl", to:"nas-storage", label:"writes media files", detail:"gallery-dl downloads and saves files to /nas/inkwell/{handle}/{year}/" },
+      { from:"downloader", to:"nas-storage", label:"_diff_snapshots()", detail:"Compares before/after snapshots to count new files and bytes" },
+      { from:"downloader", to:"database", label:"update_job_completion()", detail:"Records final status, file count, total bytes, and any error message" },
+    ]
+  },
+  {
+    id: "download-all",
+    name: "Download All Artists",
+    desc: "Batch download for all active artists with NAS pre-flight check, per-site rate limit awareness, and inter-artist cooldown.",
+    steps: [
+      { from:"downloads", to:"downloader", label:"download_all(config, registry)", detail:"Starts batch download in a background thread" },
+      { from:"downloader", to:"database", label:"get_active_artists()", detail:"Fetches all artists where is_active=1" },
+      { from:"downloader", to:"nas-monitor", label:"check_nas_with_retry()", detail:"Pre-flight: verifies NAS mount is writable (4 retries with backoff)" },
+      { from:"downloader", to:"rate-limiter", label:"is_site_paused()", detail:"Skips artists whose site cooldown multiplier exceeds pause threshold" },
+      { from:"downloader", to:"downloader", label:"download_artist() × N", detail:"Downloads each artist sequentially with per-artist retry logic" },
+      { from:"downloader", to:"rate-limiter", label:"get_cooldown_multiplier()", detail:"Gets scaled multiplier for inter-artist cooldown delay" },
+    ]
+  },
+  {
+    id: "scheduled-download",
+    name: "Scheduled Download",
+    desc: "APScheduler triggers download_all() on a cron schedule (default: 0 3 * * *). Logs start and completion.",
+    steps: [
+      { from:"scheduler", to:"downloader", label:"download_all(triggered_by='scheduled')", detail:"Cron trigger fires and invokes the full download pipeline" },
+      { from:"scheduler", to:"database", label:"insert_log() × 2", detail:"Logs 'Scheduled download run starting' and completion summary" },
+    ]
+  },
+  {
+    id: "upload-auth",
+    name: "Upload Auth Credentials",
+    desc: "User uploads a cookies.txt (X.com, DeviantArt) or refresh token (Pixiv) via Settings. File is saved to the data volume and auth state is marked valid.",
+    steps: [
+      { from:"settings", to:"cookie-mgr", label:"save_file(path, content, adapter)", detail:"Writes auth file to /app/data/ named volume" },
+      { from:"cookie-mgr", to:"xcom", label:"adapter.mark_auth_valid()", detail:"Sets auth_valid:{site}=1 in DB state (applies to any adapter)" },
+    ]
+  },
+  {
+    id: "rate-limit-hit",
+    name: "Rate Limit Detection",
+    desc: "When gallery-dl hits a 429/rate-limit response, Inkwell records the hit and exponentially increases the cooldown multiplier for that site.",
+    steps: [
+      { from:"downloader", to:"xcom", label:"detect_rate_limit_error(stderr)", detail:"Checks stderr for '429' or 'rate limit' patterns (applies to any adapter)" },
+      { from:"downloader", to:"rate-limiter", label:"record_hit(site, config)", detail:"Increments hit count and multiplies cooldown (max 8.0×)" },
+      { from:"rate-limiter", to:"database", label:"set_state() multiplier", detail:"Persists rate limit state as JSON in the state table" },
+      { from:"downloader", to:"database", label:"update_job_completion('failed')", detail:"Marks job as failed with rate limit error, skips remaining retries" },
+    ]
+  },
+  {
+    id: "auth-error",
+    name: "Auth Error Detection",
+    desc: "When gallery-dl encounters an auth error (401, login required, expired token), the site credentials are marked invalid and the user is warned in the dashboard banner.",
+    steps: [
+      { from:"downloader", to:"xcom", label:"detect_auth_error(stderr)", detail:"Checks stderr for 'login', 'unauthorized', '401', 'token' patterns (any adapter)" },
+      { from:"downloader", to:"xcom", label:"mark_auth_invalid()", detail:"Sets auth_valid:{site}=0 in DB state so UI shows re-auth banner" },
+      { from:"downloader", to:"database", label:"update_job_completion('failed')", detail:"Marks job as failed with auth error message" },
+    ]
+  },
+  {
+    id: "rate-limit-decay",
+    name: "Rate Limit Decay",
+    desc: "On each successful download, the cooldown multiplier decays back toward 1.0. When it reaches 1.0, the hit count resets and the site is fully unpaused.",
+    steps: [
+      { from:"downloader", to:"rate-limiter", label:"record_success(site, config)", detail:"Reduces multiplier by decay_rate (default 0.5) per successful download" },
+      { from:"rate-limiter", to:"database", label:"set_state() updated", detail:"Persists new multiplier; resets hit_count when multiplier reaches 1.0" },
+    ]
+  },
+  {
+    id: "view-jobs",
+    name: "View Job History",
+    desc: "Displays recent download jobs with artist handle, status, file count, size, and trigger source. Supports filtering by status.",
+    steps: [
+      { from:"downloads", to:"database", label:"get_jobs_with_artist_info(status, limit=50)", detail:"Joins jobs + artists tables, returns recent jobs ordered by started_at" },
+    ]
+  },
+  {
+    id: "view-logs",
+    name: "View Logs",
+    desc: "Displays application logs from the SQLite logs table, filterable by level (INFO/WARNING/ERROR) and source (downloader/scheduler/bootstrap).",
+    steps: [
+      { from:"logs-sec", to:"database", label:"get_logs(level, source, limit)", detail:"Queries logs table with optional filters, returns most recent entries" },
+    ]
+  },
+  {
+    id: "nas-check",
+    name: "NAS Unavailable Handling",
+    desc: "If the NAS mount becomes unavailable, the pre-flight check fails after 4 retries and the entire download run is aborted with a log entry.",
+    steps: [
+      { from:"downloader", to:"nas-monitor", label:"check_nas_with_retry()", detail:"Attempts write check 4 times with [1s, 2s, 4s, 8s] backoff" },
+      { from:"nas-monitor", to:"nas-storage", label:"write + unlink test file", detail:"Creates and deletes .inkwell_nas_check file to verify write access" },
+      { from:"nas-monitor", to:"downloader", label:"returns false", detail:"If all retries fail, signals NAS is unavailable" },
+      { from:"downloader", to:"database", label:"insert_log('ERROR', ...)", detail:"Logs 'NAS unavailable, aborting download run'" },
+    ]
+  },
+  {
+    id: "auth-banner",
+    name: "Auth Status Banner",
+    desc: "On dashboard load, the app checks each site adapter's auth validity and file age, displaying warning banners for invalid or stale credentials.",
+    steps: [
+      { from:"app", to:"site-registry", label:"registry.all_adapters()", detail:"Iterates over all registered site adapters" },
+      { from:"site-registry", to:"cookie-mgr", label:"is_file_expired(auth_file, warning_days)", detail:"Checks if credential files are older than expiry_warning_days (default 30)" },
+      { from:"app", to:"database", label:"get_state('auth_valid:{site}')", detail:"Checks if auth was marked invalid by a previous download error" },
+    ]
+  },
+];
+
+// ── State ──
+let activeFlowId = null;
+
+// ── Init ──
+function init() {
+  renderLegend();
+  renderNodes();
+  renderFlowButtons();
+  document.getElementById("clear-btn").addEventListener("click", () => selectFlow(null));
+}
+
+function renderLegend() {
+  const el = document.getElementById("legend");
+  Object.entries(CATEGORIES).forEach(([key, cat]) => {
+    el.innerHTML += `<div class="legend-item"><div class="legend-dot" style="background:${cat.color}"></div>${cat.label}</div>`;
+  });
+}
+
+function renderNodes() {
+  const container = document.getElementById("nodes");
+  NODES.forEach(n => {
+    const div = document.createElement("div");
+    div.className = "node";
+    div.dataset.cat = n.cat;
+    div.dataset.id = n.id;
+    div.style.left = n.x + "px";
+    div.style.top = n.y + "px";
+    div.innerHTML = n.label + '<span class="sub"><br>' + n.sub + '</span>';
+    container.appendChild(div);
+  });
+}
+
+function renderFlowButtons() {
+  const list = document.getElementById("flow-list");
+  FLOWS.forEach(f => {
+    const btn = document.createElement("button");
+    btn.className = "flow-btn";
+    btn.textContent = f.name;
+    btn.dataset.flow = f.id;
+    btn.addEventListener("click", () => selectFlow(f.id));
+    list.appendChild(btn);
+  });
+}
+
+// ── Selection ──
+function selectFlow(flowId) {
+  activeFlowId = flowId;
+
+  // Buttons
+  document.querySelectorAll(".flow-btn").forEach(b =>
+    b.classList.toggle("active", b.dataset.flow === flowId)
+  );
+
+  const flow = FLOWS.find(f => f.id === flowId) || null;
+  const involved = flow
+    ? new Set(flow.steps.flatMap(s => [s.from, s.to]))
+    : new Set();
+
+  // Nodes
+  document.querySelectorAll(".node").forEach(el => {
+    const id = el.dataset.id;
+    el.classList.toggle("active", involved.has(id));
+    el.classList.toggle("dimmed", flowId !== null && !involved.has(id));
+  });
+
+  drawPaths(flow);
+  renderInfoPanel(flow);
+}
+
+// ── SVG Drawing ──
+function drawPaths(flow) {
+  const svg = document.getElementById("svg");
+  svg.innerHTML = "";
+
+  // Arrow marker
+  const defs = svgEl("defs");
+  const marker = svgEl("marker", {
+    id: "arrow", markerWidth: 8, markerHeight: 6,
+    refX: 7, refY: 3, orient: "auto", markerUnits: "strokeWidth"
+  });
+  marker.appendChild(svgEl("polygon", { points: "0 0, 8 3, 0 6", fill: "#60a5fa" }));
+  defs.appendChild(marker);
+
+  const markerBg = svgEl("marker", {
+    id: "arrow-bg", markerWidth: 8, markerHeight: 6,
+    refX: 7, refY: 3, orient: "auto", markerUnits: "strokeWidth"
+  });
+  markerBg.appendChild(svgEl("polygon", { points: "0 0, 8 3, 0 6", fill: "#0f172a" }));
+  defs.appendChild(markerBg);
+  svg.appendChild(defs);
+
+  if (!flow) return;
+
+  // Group steps by (from, to) to offset duplicates
+  const groups = {};
+  flow.steps.forEach((step, i) => {
+    const key = step.from === step.to ? `self:${step.from}` : `${step.from}:${step.to}`;
+    if (!groups[key]) groups[key] = [];
+    groups[key].push({ ...step, idx: i });
+  });
+
+  let stepCounter = 0;
+  Object.values(groups).forEach(steps => {
+    const count = steps.length;
+    steps.forEach((step, gi) => {
+      stepCounter++;
+      const hOff = count > 1 ? (gi - (count - 1) / 2) * 16 : 0;
+      drawSinglePath(svg, step, stepCounter, hOff);
+    });
+  });
+}
+
+function drawSinglePath(svg, step, stepNum, hOffset) {
+  const src = nodeById(step.from);
+  const tgt = nodeById(step.to);
+  if (!src || !tgt) return;
+
+  const isSelf = src.id === tgt.id;
+  const pathData = isSelf ? selfLoopPath(src) : curvedPath(src, tgt, hOffset);
+  const mid = isSelf ? selfLoopMid(src) : pathMidpoint(src, tgt, hOffset);
+
+  // Background path (dark outline for readability)
+  const bg = svgEl("path", { d: pathData, class: "flow-path-bg active" });
+  svg.appendChild(bg);
+
+  // Main path
+  const path = svgEl("path", { d: pathData, class: "flow-path active", "marker-end": "url(#arrow)" });
+  svg.appendChild(path);
+
+  // Step number circle
+  const circle = svgEl("circle", {
+    cx: mid.x - 6, cy: mid.y, r: 9,
+    fill: "#3b82f6", class: "step-circle active"
+  });
+  svg.appendChild(circle);
+
+  const numText = svgEl("text", {
+    x: mid.x - 6, y: mid.y,
+    class: "step-num-text"
+  });
+  numText.textContent = stepNum;
+  svg.appendChild(numText);
+
+  // Label text
+  const label = svgEl("text", {
+    x: mid.x + 8, y: mid.y + 1,
+    class: "flow-text active",
+    "dominant-baseline": "central"
+  });
+  label.textContent = truncateLabel(step.label, 36);
+  svg.appendChild(label);
+}
+
+function curvedPath(src, tgt, hOff) {
+  const down = tgt.y > src.y;
+  const sx = src.x + hOff;
+  const sy = down ? src.y + NH / 2 : src.y - NH / 2;
+  const ex = tgt.x + hOff;
+  const ey = down ? tgt.y - NH / 2 : tgt.y + NH / 2;
+  const dy = ey - sy;
+  return `M ${sx} ${sy} C ${sx} ${sy + dy * 0.45}, ${ex} ${ey - dy * 0.45}, ${ex} ${ey}`;
+}
+
+function pathMidpoint(src, tgt, hOff) {
+  const down = tgt.y > src.y;
+  const sx = src.x + hOff;
+  const sy = down ? src.y + NH / 2 : src.y - NH / 2;
+  const ex = tgt.x + hOff;
+  const ey = down ? tgt.y - NH / 2 : tgt.y + NH / 2;
+  const dy = ey - sy;
+  const cy1 = sy + dy * 0.45;
+  const cy2 = ey - dy * 0.45;
+  // Cubic bezier midpoint at t=0.5
+  const mx = 0.125 * sx + 0.375 * sx + 0.375 * ex + 0.125 * ex;
+  const my = 0.125 * sy + 0.375 * cy1 + 0.375 * cy2 + 0.125 * ey;
+  return { x: mx, y: my };
+}
+
+function selfLoopPath(node) {
+  const rx = node.x + NW / 2 + 2;
+  const ry = node.y;
+  return `M ${rx} ${ry - 10} C ${rx + 45} ${ry - 14}, ${rx + 45} ${ry + 14}, ${rx} ${ry + 10}`;
+}
+
+function selfLoopMid(node) {
+  return { x: node.x + NW / 2 + 50, y: node.y };
+}
+
+function truncateLabel(s, max) {
+  return s.length > max ? s.slice(0, max - 1) + "\u2026" : s;
+}
+
+function svgEl(tag, attrs) {
+  const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
+  if (attrs) Object.entries(attrs).forEach(([k, v]) => el.setAttribute(k, v));
+  return el;
+}
+
+function nodeById(id) {
+  return NODES.find(n => n.id === id);
+}
+
+// ── Info Panel ──
+function renderInfoPanel(flow) {
+  const panel = document.getElementById("info-panel");
+  if (!flow) {
+    panel.innerHTML = '<p class="hint" id="hint">Select a workflow from the sidebar to visualize the data flow between components.</p>';
+    return;
+  }
+
+  let html = `<div class="info-content">`;
+  html += `<div class="info-header"><h3>${flow.name}</h3><p class="desc">${flow.desc}</p></div>`;
+  html += `<div class="steps-scroll">`;
+
+  flow.steps.forEach((step, i) => {
+    const src = nodeById(step.from);
+    const tgt = nodeById(step.to);
+    const srcLabel = src ? src.label : step.from;
+    const tgtLabel = tgt ? tgt.label : step.to;
+    html += `<div class="step-card">
+      <div class="sc-num">Step ${i + 1} — ${srcLabel} → ${tgtLabel}</div>
+      <div class="sc-label">${step.label}</div>
+      <div class="sc-detail">${step.detail}</div>
+    </div>`;
+  });
+
+  html += `</div></div>`;
+  panel.innerHTML = html;
+}
+
+// ── Boot ──
+init();
+</script>
+</body>
+</html>
