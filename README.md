@@ -15,7 +15,6 @@ Self-hosted media archiver for X.com (Twitter) artists. Downloads high-resolutio
 ## Requirements
 
 - Docker + Docker Compose (v2)
-- Docker Buildx plugin (included in Docker Desktop; on Linux, install via `sudo apt install docker-buildx-plugin`)
 - NFS share mounted on the host (e.g., `/nas/inkwell/`)
 
 ## Quickstart
@@ -40,7 +39,7 @@ This is required on first launch. The password is hashed with bcrypt and stored 
 ### 3. Start the container
 
 ```bash
-docker compose up -d
+docker compose pull && docker compose up -d
 ```
 
 ### 4. Open the dashboard
@@ -134,16 +133,8 @@ uv sync --dev
 # Run tests
 .venv/bin/python -m pytest tests/ -v
 
-# Rebuild container after code changes
+# Build locally (uncomment build: . in compose.yaml first)
 docker compose up -d --build
-```
-
-### "docker compose build" warns about missing buildx
-
-Install the plugin:
-
-```bash
-sudo apt install docker-buildx-plugin
 ```
 
 ## License

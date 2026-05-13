@@ -1,6 +1,7 @@
 services:
   inkwell:
-    build: .
+    image: ghcr.io/nathanpt/inkwell:latest
+    # build: .  # uncomment for local development builds
     container_name: inkwell
     ports:
       - "8501:8501"
