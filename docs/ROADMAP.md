@@ -9,6 +9,8 @@
 
 ## Completed
 
+- [x] Refactor Streamlit UI layout (horizontal button alignment, two-tier downloads, vertical_alignment)
+- [x] Fix cookies.txt upload rerun loop (file_uploader retained state across reruns)
 - [x] Refactor to connection-per-operation pattern (eliminate SQLite threading errors)
 - [x] Fix SQLite threading error — stop sharing connection across Streamlit threads
 - [x] Fix concurrent SQLite writes from progress polling thread (use separate connection)

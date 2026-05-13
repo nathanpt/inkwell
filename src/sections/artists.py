@@ -22,13 +22,16 @@ def render_artists():
     config = st.session_state.config
     registry = get_registry()
 
-    # Add artist form
+    # Add artist form — input and button on the same row
     with st.form("add_artist"):
-        url = st.text_input(
-            "Artist URL",
-            placeholder="https://x.com/handle, https://www.pixiv.net/users/123, https://www.deviantart.com/name",
-        )
-        submitted = st.form_submit_button("Add Artist")
+        col_input, col_btn = st.columns([4, 1], vertical_alignment="bottom")
+        with col_input:
+            url = st.text_input(
+                "Artist URL",
+                placeholder="https://x.com/handle, https://www.pixiv.net/users/123, https://www.deviantart.com/name",
+            )
+        with col_btn:
+            submitted = st.form_submit_button("Add Artist", use_container_width=True)
         if submitted and url:
             try:
                 handle, normalized_url, adapter = validate_url(url)
@@ -65,21 +68,19 @@ def render_artists():
         display = adapter.get_display_handle(artist)
         site_label = SITE_LABELS.get(artist.site, artist.site)
 
-        col1, col2, col3 = st.columns([3, 2, 1])
-        with col1:
+        col_info, col_rm, col_del = st.columns([0.6, 0.2, 0.2], vertical_alignment="center")
+        with col_info:
             last_scan = artist.last_scan_at or "Never"
-            st.markdown(f"**{display}** ({site_label}) — last scan: {last_scan}")
-        with col2:
             count, size = disk_usage.get(artist.handle, (0, 0))
-            if count > 0:
-                st.caption(f"{count:,} file(s) · {_format_bytes(size)}")
-        with col3:
-            if st.button("Remove", key=f"rm_{artist.id}"):
+            meta = f"{count:,} file(s) · {_format_bytes(size)}" if count > 0 else "No files"
+            st.markdown(f"**{display}** ({site_label}) — last scan: {last_scan}  \n{meta}")
+        with col_rm:
+            if st.button("Remove", key=f"rm_{artist.id}", use_container_width=True):
                 db.deactivate_artist(artist.id)
                 st.success(f"Removed {display} from queue")
                 st.rerun()
-
-            if st.button("Delete Files", key=f"del_{artist.id}"):
+        with col_del:
+            if st.button("Delete Files", key=f"del_{artist.id}", use_container_width=True):
                 db.deactivate_artist(artist.id)
                 artist_dir = Path(config.nas.mount_path) / artist.handle
                 if artist_dir.exists():

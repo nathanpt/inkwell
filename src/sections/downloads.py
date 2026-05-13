@@ -34,22 +34,25 @@ def render_downloads():
     config = st.session_state.config
     registry = get_registry()
 
-    # Download controls
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("Download All Now"):
-            _run_in_thread(download_all, extra_args=(config, registry, "manual"))
-            st.info("Download started in background. Refresh to see progress.")
-    with col2:
-        artists = db.get_active_artists()
-        if artists:
+    # Tier 1: Global action
+    if st.button("Download All Now", type="primary", use_container_width=True):
+        _run_in_thread(download_all, extra_args=(config, registry, "manual"))
+        st.info("Download started in background. Refresh to see progress.")
+
+    # Tier 2: Single-artist download
+    st.divider()
+    artists = db.get_active_artists()
+    if artists:
+        col_select, col_action = st.columns([3, 1], vertical_alignment="bottom")
+        with col_select:
             selected = st.selectbox(
                 "Single artist",
                 options=[(a.id, _artist_label(a, registry)) for a in artists],
                 format_func=lambda x: x[1],
                 key="single_artist_select",
             )
-            if st.button("Download Selected"):
+        with col_action:
+            if st.button("Download Selected", use_container_width=True):
                 artist = next(a for a in artists if a.id == selected[0])
                 _run_in_thread(download_artist, extra_args=(artist, config, registry, "manual"))
                 st.info(f"Download started for {registry.get(artist.site).get_display_handle(artist)}")
