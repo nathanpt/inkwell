@@ -8,6 +8,15 @@ import pytest
 
 from src import db
 from src.config_loader import Config, DownloadConfig, NASConfig
+from src.sites.base import SiteRegistry
+from src.sites.xcom import XComAdapter
+
+
+@pytest.fixture
+def test_registry():
+    reg = SiteRegistry()
+    reg.register(XComAdapter())
+    return reg
 
 
 @pytest.fixture

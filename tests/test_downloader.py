@@ -52,7 +52,7 @@ class TestSnapshotDirectory:
 
 
 class TestJobLock:
-    def test_rejects_duplicate_running_job(self, db_conn, test_config):
+    def test_rejects_duplicate_running_job(self, db_conn, test_config, test_registry):
         artist = Artist(handle="test", site="x.com", source_url="https://x.com/test")
         artist.id = db.insert_artist(db_conn, artist)
 
@@ -62,7 +62,7 @@ class TestJobLock:
 
         # Attempt to download same artist should return existing job
         with patch("src.downloader._run_gallery_dl"):
-            result = download_artist(db_conn, artist, test_config)
+            result = download_artist(db_conn, artist, test_config, test_registry)
         assert result.status == "running"
         # Should not have created a new job
         jobs = db_conn.execute("SELECT COUNT(*) FROM jobs WHERE artist_id = ?", (artist.id,)).fetchone()
@@ -70,7 +70,7 @@ class TestJobLock:
 
 
 class TestDownloadArtist:
-    def test_success_records_metrics(self, db_conn, test_config, artist_dir):
+    def test_success_records_metrics(self, db_conn, test_config, artist_dir, test_registry):
         artist = Artist(handle="testartist", site="x.com", source_url="https://x.com/testartist")
         artist.id = db.insert_artist(db_conn, artist)
 
@@ -87,13 +87,13 @@ class TestDownloadArtist:
             return mock_result
 
         with patch("src.downloader._run_gallery_dl", side_effect=_mock_download):
-            job = download_artist(db_conn, artist, test_config)
+            job = download_artist(db_conn, artist, test_config, test_registry)
 
         assert job.status == "success"
         assert job.file_count == 1
         assert job.total_bytes == 200
 
-    def test_auth_error_sets_state(self, db_conn, test_config):
+    def test_auth_error_sets_state(self, db_conn, test_config, test_registry):
         artist = Artist(handle="locked", site="x.com", source_url="https://x.com/locked")
         artist.id = db.insert_artist(db_conn, artist)
 
@@ -102,12 +102,12 @@ class TestDownloadArtist:
         mock_result.stderr = "Error: login required"
 
         with patch("src.downloader._run_gallery_dl", return_value=mock_result):
-            job = download_artist(db_conn, artist, test_config)
+            job = download_artist(db_conn, artist, test_config, test_registry)
 
         assert job.status == "failed"
-        assert db.get_state(db_conn, "auth_session_valid") == "0"
+        assert db.get_state(db_conn, "auth_valid:x.com") == "0"
 
-    def test_retries_on_transient_failure(self, db_conn, test_config):
+    def test_retries_on_transient_failure(self, db_conn, test_config, test_registry):
         artist = Artist(handle="flaky", site="x.com", source_url="https://x.com/flaky")
         artist.id = db.insert_artist(db_conn, artist)
 
@@ -120,6 +120,6 @@ class TestDownloadArtist:
         success_result.stderr = ""
 
         with patch("src.downloader._run_gallery_dl", side_effect=[fail_result, success_result]):
-            job = download_artist(db_conn, artist, test_config)
+            job = download_artist(db_conn, artist, test_config, test_registry)
 
         assert job.status == "success"

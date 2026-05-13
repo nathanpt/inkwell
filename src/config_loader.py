@@ -41,6 +41,11 @@ class RetentionConfig:
 
 
 @dataclass
+class SiteConfig:
+    cooldown: list[int] = field(default_factory=lambda: [30, 60])
+
+
+@dataclass
 class Config:
     nas: NASConfig = field(default_factory=NASConfig)
     schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
@@ -48,10 +53,15 @@ class Config:
     cookies: CookiesConfig = field(default_factory=CookiesConfig)
     auth: AuthConfig = field(default_factory=AuthConfig)
     retention: RetentionConfig = field(default_factory=RetentionConfig)
+    sites: dict[str, SiteConfig] = field(default_factory=dict)
 
 
 def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
     raw = tomllib.loads(path.read_text())
+    sites_raw = raw.pop("sites", {})
+    sites = {
+        name: SiteConfig(**cfg) for name, cfg in sites_raw.items()
+    }
     return Config(
         nas=NASConfig(**raw.get("nas", {})),
         schedule=ScheduleConfig(**raw.get("schedule", {})),
@@ -59,4 +69,5 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
         cookies=CookiesConfig(**raw.get("cookies", {})),
         auth=AuthConfig(**raw.get("auth", {})),
         retention=RetentionConfig(**raw.get("retention", {})),
+        sites=sites,
     )

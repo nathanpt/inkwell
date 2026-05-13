@@ -18,3 +18,12 @@ password_hash = ""
 
 [retention]
 log_days = 90
+
+[sites.xcom]
+cooldown = [30, 60]
+
+[sites.pixiv]
+cooldown = [5, 15]
+
+[sites.deviantart]
+cooldown = [5, 15]

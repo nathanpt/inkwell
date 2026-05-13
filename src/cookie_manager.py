@@ -8,24 +8,21 @@ from src import db
 
 logger = logging.getLogger(__name__)
 
-COOKIES_PATH = Path("/app/data/cookies.txt")
+
+def save_file(path: Path, content: bytes, conn: sqlite3.Connection, adapter=None) -> None:
+    """Write auth file to the named volume and mark auth as valid for the adapter's site."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+    if adapter:
+        adapter.mark_auth_valid(conn)
+    logger.info("Auth file saved to %s (%d bytes)", path, len(content))
 
 
-def save_cookies(conn: sqlite3.Connection, content: bytes) -> None:
-    """Write uploaded cookies to the named volume and mark auth as valid."""
-    import sqlite3
-
-    COOKIES_PATH.parent.mkdir(parents=True, exist_ok=True)
-    COOKIES_PATH.write_bytes(content)
-    db.set_state(conn, "auth_session_valid", "1")
-    logger.info("Cookies uploaded (%d bytes)", len(content))
-
-
-def get_cookie_info() -> dict:
-    """Return cookie file metadata: exists, size, last modified time."""
-    if not COOKIES_PATH.exists():
+def get_file_info(path: Path) -> dict:
+    """Return file metadata: exists, size, last modified time."""
+    if not path.exists():
         return {"exists": False, "size": 0, "modified": None}
-    stat = COOKIES_PATH.stat()
+    stat = path.stat()
     return {
         "exists": True,
         "size": stat.st_size,
@@ -33,14 +30,9 @@ def get_cookie_info() -> dict:
     }
 
 
-def is_auth_valid(conn: sqlite3.Connection) -> bool:
-    """Check if auth session is marked as valid."""
-    return db.get_state(conn, "auth_session_valid") == "1"
-
-
-def is_cookies_expired(expiry_warning_days: int) -> bool:
-    """Check if cookies file is older than the warning threshold."""
-    info = get_cookie_info()
+def is_file_expired(path: Path, expiry_warning_days: int) -> bool:
+    """Check if a file is older than the warning threshold."""
+    info = get_file_info(path)
     if not info["exists"] or info["modified"] is None:
         return True
     age_seconds = time.time() - info["modified"]

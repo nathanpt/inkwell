@@ -11,23 +11,21 @@ from src import db
 from src.config_loader import Config
 from src.models import Artist, Job
 from src.nas_monitor import check_nas_with_retry
+from src.sites.base import SiteAdapter, SiteRegistry
 
 logger = logging.getLogger(__name__)
-
-GALLERY_DL_CONF = Path("/app/config/gallery-dl.conf")
-ARCHIVE_DB = Path("/app/data/archive.db")
-COOKIES_PATH = Path("/app/data/cookies.txt")
-
-AUTH_ERROR_PATTERN = "login"
 
 
 def download_artist(
     conn: sqlite3.Connection,
     artist: Artist,
     config: Config,
+    registry: SiteRegistry,
     triggered_by: str = "manual",
 ) -> Job:
     """Download media for a single artist. Returns the completed Job."""
+    adapter = registry.get(artist.site)
+
     # Job lock: check for existing running job
     existing = db.get_running_job_for_artist(conn, artist.id)
     if existing:
@@ -46,7 +44,7 @@ def download_artist(
     last_error = None
     for attempt in range(config.download.retry_attempts):
         try:
-            result = _run_gallery_dl(artist.source_url, config)
+            result = _run_gallery_dl(artist.source_url, config, adapter)
             if result.returncode == 0:
                 # Success — compute metrics
                 after_snapshot = _snapshot_directory(artist_dir)
@@ -64,10 +62,10 @@ def download_artist(
 
             # Non-zero exit — categorize error
             stderr = result.stderr or ""
-            if _is_auth_error(stderr):
-                db.set_state(conn, "auth_session_valid", "0")
-                db.update_job_completion(conn, job.id, "failed", 0, 0, error_message="Auth error: cookies may be expired")
-                db.insert_log(conn, "ERROR", "downloader", f"Auth error for {artist.handle}: cookies invalid", job_id=job.id, artist_id=artist.id)
+            if adapter.detect_auth_error(stderr):
+                adapter.mark_auth_invalid(conn)
+                db.update_job_completion(conn, job.id, "failed", 0, 0, error_message="Auth error: credentials may be expired")
+                db.insert_log(conn, "ERROR", "downloader", f"Auth error for {artist.handle}: credentials invalid", job_id=job.id, artist_id=artist.id)
                 job.status = "failed"
                 job.error_message = "Auth error"
                 return job
@@ -102,6 +100,7 @@ def download_artist(
 def download_all(
     conn: sqlite3.Connection,
     config: Config,
+    registry: SiteRegistry,
     triggered_by: str = "manual",
 ) -> list[Job]:
     """Download all active artists sequentially with NAS pre-flight check."""
@@ -118,7 +117,7 @@ def download_all(
     jobs: list[Job] = []
     for i, artist in enumerate(artists):
         logger.info("Downloading %s (%d/%d)", artist.handle, i + 1, len(artists))
-        job = download_artist(conn, artist, config, triggered_by)
+        job = download_artist(conn, artist, config, registry, triggered_by)
         jobs.append(job)
 
         # Inter-artist cooldown with jitter
@@ -134,16 +133,16 @@ def download_all(
 
 
 def _run_gallery_dl(
-    source_url: str, config: Config
+    source_url: str, config: Config, adapter: SiteAdapter
 ) -> subprocess.CompletedProcess[str]:
     cmd = [
         "gallery-dl",
-        "--config", str(GALLERY_DL_CONF),
+        "--config", str(adapter.get_gallery_dl_config_path()),
         "--dest", config.nas.mount_path,
-        "--write-archive", f"sqlite:///{ARCHIVE_DB}",
+        "--write-archive", f"sqlite:///{adapter.get_archive_db_path()}",
     ]
-    if COOKIES_PATH.exists():
-        cmd.extend(["--cookies", str(COOKIES_PATH)])
+    for auth_file in adapter.get_auth_files():
+        cmd.extend(["--cookies", str(auth_file)])
     cmd.append(source_url)
 
     return subprocess.run(
@@ -152,11 +151,6 @@ def _run_gallery_dl(
         text=True,
         timeout=config.download.timeout,
     )
-
-
-def _is_auth_error(stderr: str) -> bool:
-    lower = stderr.lower()
-    return "login" in lower or "unauthorized" in lower or "401" in lower
 
 
 def _snapshot_directory(path: Path) -> dict[str, int]:

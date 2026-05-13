@@ -7,7 +7,9 @@ services:
     volumes:
       - inkwell-data:/app/data
       - ./config.toml:/app/config/config.toml:ro
-      - ./gallery-dl.conf:/app/config/gallery-dl.conf:ro
+      - ./gallery-dl.xcom.conf:/app/config/gallery-dl.xcom.conf:ro
+      - ./gallery-dl.pixiv.conf:/app/config/gallery-dl.pixiv.conf:ro
+      - ./gallery-dl.deviantart.conf:/app/config/gallery-dl.deviantart.conf:ro
       - /nas/inkwell:/nas/inkwell:rw
     environment:
       - INKWELL_PASSWORD=${INKWELL_PASSWORD}

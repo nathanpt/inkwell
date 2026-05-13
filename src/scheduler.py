@@ -9,6 +9,7 @@ from apscheduler.triggers.cron import CronTrigger
 from src import db
 from src.config_loader import Config
 from src.downloader import download_all
+from src.sites.base import SiteRegistry, create_registry
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ def create_scheduler(
         _scheduled_run,
         trigger=trigger,
         id="inkwell_scheduled_download",
-        kwargs={"conn": conn, "config": config},
+        kwargs={"conn": conn, "config": config, "registry": create_registry()},
         replace_existing=True,
     )
 
@@ -48,12 +49,12 @@ def create_scheduler(
     return scheduler
 
 
-def _scheduled_run(conn: sqlite3.Connection, config: Config) -> None:
+def _scheduled_run(conn: sqlite3.Connection, config: Config, registry: SiteRegistry) -> None:
     """Callback for the scheduled download job."""
     logger.info("Scheduled download run starting")
     db.insert_log(conn, "INFO", "scheduler", "Scheduled download run starting")
     try:
-        jobs = download_all(conn, config, triggered_by="scheduled")
+        jobs = download_all(conn, config, registry, triggered_by="scheduled")
         succeeded = sum(1 for j in jobs if j.status == "failed")
         db.insert_log(
             conn,

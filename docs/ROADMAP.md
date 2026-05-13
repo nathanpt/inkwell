@@ -15,10 +15,10 @@
 
 > No architectural changes needed — the artist model is site-agnostic. Adding new sites requires new URL patterns and auth, not a re-architecture.
 
-- [ ] Pixiv support (URL patterns + OAuth refresh tokens)
-- [ ] DeviantArt support
-- [ ] Per-site auth adapter interface
-- [ ] Site-specific gallery-dl config overrides
+- [x] Pixiv support (URL patterns + OAuth refresh tokens)
+- [x] DeviantArt support
+- [x] Per-site auth adapter interface
+- [x] Site-specific gallery-dl config overrides
 - [ ] Image gallery integration (Piwigo, Komga)
 - [ ] Discord/Telegram notifications on new archival
 - [ ] Automated SQLite dumps and NAS snapshot scheduling

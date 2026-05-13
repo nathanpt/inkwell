@@ -1,0 +1,66 @@
+from __future__ import annotations
+
+import re
+import sqlite3
+from pathlib import Path
+
+from src.models import Artist
+from src.sites.base import SiteAdapter
+
+DA_PATTERN = re.compile(
+    r"^https?://www\.deviantart\.com/([a-zA-Z0-9_-]+)/?$"
+)
+
+CONFIG_PATH = Path("/app/config/gallery-dl.deviantart.conf")
+ARCHIVE_DB = Path("/app/data/archive.deviantart.db")
+COOKIES_PATH = Path("/app/data/cookies.deviantart.txt")
+AUTH_STATE_KEY = "auth_valid:deviantart"
+
+
+class DeviantArtAdapter(SiteAdapter):
+
+    @property
+    def name(self) -> str:
+        return "deviantart"
+
+    def match_url(self, url: str) -> bool:
+        return bool(DA_PATTERN.match(url.strip()))
+
+    def parse_url(self, url: str) -> tuple[str, str]:
+        url = url.strip()
+        match = DA_PATTERN.match(url)
+        if not match:
+            raise ValueError(
+                "Invalid URL. Must be https://www.deviantart.com/{username}"
+            )
+        username = match.group(1)
+        normalized_url = f"https://www.deviantart.com/{username}"
+        return username, normalized_url
+
+    def get_gallery_dl_config_path(self) -> Path:
+        return CONFIG_PATH
+
+    def get_archive_db_path(self) -> Path:
+        return ARCHIVE_DB
+
+    def get_auth_files(self) -> list[Path]:
+        return [COOKIES_PATH] if COOKIES_PATH.exists() else []
+
+    def is_auth_valid(self, conn: sqlite3.Connection) -> bool:
+        from src import db
+        return db.get_state(conn, AUTH_STATE_KEY) != "0"
+
+    def mark_auth_invalid(self, conn: sqlite3.Connection) -> None:
+        from src import db
+        db.set_state(conn, AUTH_STATE_KEY, "0")
+
+    def mark_auth_valid(self, conn: sqlite3.Connection) -> None:
+        from src import db
+        db.set_state(conn, AUTH_STATE_KEY, "1")
+
+    def detect_auth_error(self, stderr: str) -> bool:
+        lower = stderr.lower()
+        return "unauthorized" in lower or "401" in lower or "forbidden" in lower
+
+    def get_display_handle(self, artist: Artist) -> str:
+        return artist.handle

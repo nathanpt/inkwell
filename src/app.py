@@ -6,7 +6,7 @@ import bcrypt
 import streamlit as st
 
 from src.bootstrap import bootstrap
-from src.cookie_manager import is_auth_valid, is_cookies_expired
+from src.url_validator import get_registry
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
@@ -18,6 +18,9 @@ def _init_session_state():
         conn, config = bootstrap()
         st.session_state.conn = conn
         st.session_state.config = config
+
+        # Initialize site registry
+        get_registry()
 
         from src.scheduler import create_scheduler
 
@@ -50,11 +53,17 @@ def _render_login():
 def _render_auth_banner():
     conn = st.session_state.conn
     config = st.session_state.config
+    registry = get_registry()
 
-    if not is_auth_valid(conn):
-        st.error("**RE-UPLOAD COOKIES** — Authentication session is invalid. Upload fresh cookies in Settings.", icon="🚨")
-    elif is_cookies_expired(config.cookies.expiry_warning_days):
-        st.warning(f"Cookies are older than {config.cookies.expiry_warning_days} days. Consider re-uploading.", icon="⚠️")
+    from src.cookie_manager import is_file_expired
+
+    for adapter in registry.all_adapters():
+        if not adapter.is_auth_valid(conn):
+            st.error(f"**RE-AUTHENTICATE {adapter.name.upper()}** — Credentials are invalid. Upload fresh credentials in Settings.", icon="🚨")
+        else:
+            for auth_file in adapter.get_auth_files():
+                if is_file_expired(auth_file, config.cookies.expiry_warning_days):
+                    st.warning(f"{adapter.name}: credentials are older than {config.cookies.expiry_warning_days} days. Consider re-uploading.", icon="⚠️")
 
 
 def _render_dashboard():

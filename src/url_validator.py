@@ -1,23 +1,33 @@
 from __future__ import annotations
 
-import re
-
-X_COM_PATTERN = re.compile(
-    r"^https?://(x\.com|twitter\.com)/([a-zA-Z0-9_]{1,15})/?$"
-)
+from src.sites.base import SiteAdapter, SiteRegistry, create_registry
 
 
-def validate_url(url: str) -> tuple[str, str]:
-    """Validate an X.com/Twitter URL and return (handle, normalized_url).
+def validate_url(url: str) -> tuple[str, str, SiteAdapter]:
+    """Validate a URL against all registered site adapters.
 
-    Raises ValueError if the URL is invalid.
+    Returns (handle, normalized_url, adapter).
+    Raises ValueError if no adapter matches.
     """
-    url = url.strip()
-    match = X_COM_PATTERN.match(url)
-    if not match:
+    registry = _get_registry()
+    adapter = registry.match_url(url)
+    if not adapter:
         raise ValueError(
-            "Invalid URL. Must be https://x.com/{handle} or https://twitter.com/{handle}"
+            "Invalid URL. Supported sites: x.com, pixiv.net/users, deviantart.com"
         )
-    handle = match.group(2)
-    normalized_url = f"https://x.com/{handle}"
-    return handle, normalized_url
+    handle, normalized_url = adapter.parse_url(url)
+    return handle, normalized_url, adapter
+
+
+def get_registry() -> SiteRegistry:
+    return _get_registry()
+
+
+def _get_registry() -> SiteRegistry:
+    try:
+        import streamlit as st
+        if "site_registry" not in st.session_state:
+            st.session_state.site_registry = create_registry()
+        return st.session_state.site_registry
+    except Exception:
+        return create_registry()
