@@ -172,7 +172,7 @@ def _update_job_progress(
     db_path: Path, job_id: int, file_count: int, total_bytes: int
 ) -> None:
     import sqlite3
-    conn = sqlite3.connect(str(db_path))
+    conn = sqlite3.connect(str(db_path), check_same_thread=False)
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute(
         "UPDATE jobs SET file_count = ?, total_bytes = ? WHERE id = ?",
