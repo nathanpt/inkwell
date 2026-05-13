@@ -11,7 +11,9 @@
 - [ ] Download history with file count and bytes columns
 - [ ] Adaptive scheduling when rate limits are frequent
 
-## Future (Multi-Site)
+## Phase 5 — Multi-Site (Future)
+
+> No architectural changes needed — the artist model is site-agnostic. Adding new sites requires new URL patterns and auth, not a re-architecture.
 
 - [ ] Pixiv support (URL patterns + OAuth refresh tokens)
 - [ ] DeviantArt support

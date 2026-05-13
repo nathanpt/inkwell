@@ -103,12 +103,11 @@ Downloaded media is organized on the NAS:
 ```
 /nas/inkwell/
 ├── artist_name/
-│   ├── 2025-01/
-│   │   ├── 001_image.jpg
-│   │   └── 002_artwork.png
-│   └── 2025-02/
+│   └── 2025/
+│       ├── 001_image.jpg
+│       └── 002_artwork.png
 └── another_artist/
-    └── 2025-03/
+    └── 2025/
 ```
 
 ## Usage

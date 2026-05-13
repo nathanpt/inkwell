@@ -339,16 +339,15 @@ result = subprocess.run(
 ```
 /nas/inkwell/
 ├── artist_name/
-│   ├── 2025-01/
-│   │   ├── 001_image.jpg
-│   │   ├── 002_artwork.png
-│   │   └── ...
-│   └── 2025-02/
+│   └── 2025/
+│       ├── 001_image.jpg
+│       ├── 002_artwork.png
+│       └── ...
 └── another_artist/
-    └── 2025-03/
+    └── 2025/
 ```
 
-- **Path template:** `/nas/inkwell/{artist_handle}/{year}-{month}/{filename}` — configured in `gallery-dl.conf`
+- **Path template:** `/nas/inkwell/{artist_handle}/{year}/{filename}` — configured in `gallery-dl.conf`
 - **Permissions:** `644` for files, `755` for directories (or as dictated by NFS mount options)
 
 ---
@@ -404,7 +403,7 @@ This config tells gallery-dl to:
 - Auto-sanitize path characters
 - Sleep 2s between downloads and 3s between extractor calls (rate limit courtesy)
 
-Note: The `{year}-{month}` subdirectory structure from the storage layout is achieved by gallery-dl's built-in per-month directory grouping when enabled. If the default behavior doesn't produce this structure, a custom `directory` format like `"{author}/{date:%Y-%m}"` can be used.
+Note: The `{year}` subdirectory structure from the storage layout is achieved by a custom `directory` format `"{author}/{date:%Y}"` in `gallery-dl.conf`.
 
 ---
 
@@ -529,7 +528,7 @@ Notes:
 
 /nas/inkwell/           (bind-mounted from host NFS)
 ├── artist_name/
-│   └── 2025-01/
+│   └── 2025/
 └── ...
 ```
 
