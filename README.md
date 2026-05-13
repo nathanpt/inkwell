@@ -1,16 +1,17 @@
 # Inkwell
 
-Self-hosted media archiver for X.com (Twitter) artists. Downloads high-resolution media to your NAS via [gallery-dl](https://github.com/mikf/gallery-dl), managed through a Streamlit web dashboard.
+Self-hosted media archiver for artists on X.com, Pixiv, and DeviantArt. Downloads high-resolution media to your NAS via [gallery-dl](https://github.com/mikf/gallery-dl), managed through a Streamlit web dashboard.
 
 ## Features
 
-- Add/remove X.com artists from a web UI
+- Add/remove artists from a web UI (X.com, Pixiv, DeviantArt)
 - Manual and scheduled (nightly) downloads
 - Incremental, deduplicated downloads via gallery-dl's archive DB
+- Adaptive rate limiting with automatic cooldown on throttled sites
 - Download metrics (file count, bytes) per job
-- Cookie management with expiry warnings
+- Cookie and token management with expiry warnings
 - Auth error detection with dashboard alerts
-- Runs as a single Docker container
+- Runs as a single Docker container with a pre-built image (no build tools needed)
 
 ## Requirements
 
@@ -120,9 +121,13 @@ Downloaded media is organized on the NAS:
 | View logs | Expand the Logs section, filter by level/source |
 | Update cookies | Settings section, upload new `cookies.txt` |
 
-## Architecture
+## Updating
 
-See [docs/DESIGN.md](docs/DESIGN.md) for the full engineering design document.
+Pull the latest image and restart:
+
+```bash
+docker compose pull && docker compose up -d
+```
 
 ## Development
 
@@ -139,4 +144,4 @@ docker compose up -d --build
 
 ## License
 
-Private project. All rights reserved.
+[MIT](LICENSE)
