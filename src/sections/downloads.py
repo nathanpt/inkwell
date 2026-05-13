@@ -65,10 +65,6 @@ def render_downloads():
     with col_clear:
         running = db.get_jobs_by_status("running")
         if running:
-            st.markdown(
-                '<meta http-equiv="refresh" content="10">',
-                unsafe_allow_html=True,
-            )
             if st.button("Clear Stuck Jobs"):
                 cleaned = db.clean_orphaned_jobs()
                 if cleaned:
