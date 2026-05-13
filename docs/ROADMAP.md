@@ -4,6 +4,7 @@
 
 - [x] Show last download time per artist in the single-artist dropdown
 - [x] Paginate or collapse artist list to prevent UI bloat at scale
+- [x] Interactive architecture flow diagram (docs/architecture.html)
 - [ ] MkDocs + Material theme documentation site, deployed to GitHub Pages
 - [ ] Image gallery integration (Piwigo, Komga)
 - [ ] Discord/Telegram notifications on new archival

@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Inkwell — Architecture &amp; Flows</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{--bg:#0f172a;--surface:#1e293b;--border:#334155;--text:#e2e8f0;--muted:#94a3b8;--accent:#38bdf8;--sidebar:280px}
+body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);overflow:hidden;height:100vh}
+#app{display:flex;height:100vh}
+aside{width:var(--sidebar);background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0}
+aside h1{padding:20px 20px 4px;font-size:22px;font-weight:700;letter-spacing:-0.5px}
+aside .subtitle{padding:0 20px 16px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;border-bottom:1px solid var(--border)}
+#flow-list{flex:1;overflow-y:auto;padding:12px}
+#flow-list::-webkit-scrollbar{width:4px}
+#flow-list::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+.flow-btn{display:block;width:100%;text-align:left;padding:10px 14px;margin-bottom:6px;border:1px solid transparent;border-radius:8px;background:transparent;color:var(--text);cursor:pointer;font-size:13px;font-family:inherit;transition:all .15s}
+.flow-btn:hover{background:#1a2744;border-color:var(--border)}
+.flow-btn.active{background:#172554;border-color:var(--accent);color:#7dd3fc}
+.flow-btn .flow-name{font-weight:600;display:block;margin-bottom:2px}
+.flow-btn .flow-desc{font-size:11px;color:var(--muted);line-height:1.3}
+.flow-btn.active .flow-desc{color:#7dd3fc99}
+.reset-btn{margin:12px;padding:10px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--muted);cursor:pointer;font-size:12px;font-family:inherit;transition:all .15s}
+.reset-btn:hover{background:#1a2744;color:var(--text)}
+
+main{flex:1;display:flex;flex-direction:column;overflow:hidden}
+#diagram-wrap{flex:1;overflow:auto;display:flex;align-items:flex-start;justify-content:center;padding:20px}
+#diagram{position:relative;width:1100px;height:620px;flex-shrink:0}
+#arrows{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:1}
+.comp{position:absolute;width:148px;padding:8px 10px;border-radius:8px;border:1.5px solid var(--border);background:var(--surface);z-index:2;cursor:default;transition:opacity .3s,box-shadow .3s,border-color .3s}
+.comp .comp-label{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.comp .comp-file{font-size:10px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px}
+.comp.dimmed{opacity:.18}
+.comp.active{border-color:var(--comp-color,var(--accent));box-shadow:0 0 20px color-mix(in srgb,var(--comp-color,var(--accent)) 30%,transparent)}
+
+.arrow-line{fill:none;stroke:#475569;stroke-width:1.5;opacity:0;transition:opacity .3s}
+.arrow-line.visible{opacity:1;stroke:var(--arrow-color,#38bdf8);stroke-width:2}
+.arrow-line.bg{opacity:.08;stroke:#475569;stroke-width:1}
+.arrow-head{fill:#475569;opacity:0;transition:opacity .3s}
+.arrow-head.visible{opacity:1;fill:var(--arrow-color,#38bdf8)}
+.arrow-line.flowing{stroke-dasharray:8 4;animation:flowDash .8s linear infinite}
+@keyframes flowDash{to{stroke-dashoffset:-12}}
+
+.step-badge{position:absolute;z-index:5;width:22px;height:22px;border-radius:50%;background:#0f172a;border:2px solid var(--arrow-color,#38bdf8);color:var(--arrow-color,#38bdf8);font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity .3s;pointer-events:auto;cursor:pointer}
+.step-badge.visible{opacity:1}
+.step-badge.highlight{background:var(--arrow-color,#38bdf8);color:#0f172a;transform:scale(1.3)}
+
+#detail-panel{height:220px;border-top:1px solid var(--border);background:var(--surface);overflow-y:auto;flex-shrink:0}
+#detail-panel::-webkit-scrollbar{width:6px}
+#detail-panel::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+#detail-inner{padding:16px 24px}
+#detail-inner h2{font-size:16px;font-weight:700;margin-bottom:4px}
+#detail-inner .detail-desc{font-size:12px;color:var(--muted);margin-bottom:14px}
+.step-row{display:flex;align-items:flex-start;gap:10px;padding:6px 10px;margin-bottom:4px;border-radius:6px;transition:background .15s;cursor:pointer}
+.step-row:hover{background:#1a2744}
+.step-row.highlight{background:#172554}
+.step-num{width:22px;height:22px;border-radius:50%;background:var(--bg);border:1.5px solid var(--accent);color:var(--accent);font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}
+.step-row.highlight .step-num{background:var(--accent);color:var(--bg)}
+.step-info{flex:1;min-width:0}
+.step-title{font-size:12px;font-weight:600}
+.step-title .arrow{color:var(--accent);margin:0 4px}
+.step-detail{font-size:11px;color:var(--muted);margin-top:1px}
+.step-tag{font-size:10px;background:#172554;color:#7dd3fc;padding:1px 6px;border-radius:4px;margin-left:6px;font-weight:500}
+.empty-state{display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+<div id="app">
+  <aside>
+    <h1>Inkwell</h1>
+    <div class="subtitle">Architecture &amp; Flows</div>
+    <div id="flow-list"></div>
+    <button class="reset-btn" id="reset-btn">Reset View</button>
+  </aside>
+  <main>
+    <div id="diagram-wrap">
+      <div id="diagram">
+        <svg id="arrows" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <marker id="ah" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+              <polygon points="0 0, 8 3, 0 6"/>
+            </marker>
+          </defs>
+        </svg>
+      </div>
+    </div>
+    <div id="detail-panel">
+      <div id="detail-inner">
+        <div class="empty-state">Select a flow from the sidebar to see how data moves through the system</div>
+      </div>
+    </div>
+  </main>
+</div>
+<script>
+const BOX_W=148,BOX_H=50;
+
+const components=[
+  {id:"user",label:"User",x:476,y:8,color:"#94a3b8",layer:"user"},
+  {id:"streamlit",label:"Streamlit UI",file:"app.py",x:468,y:76,color:"#a78bfa",layer:"entry"},
+  {id:"artists",label:"Artists Section",file:"sections/artists.py",x:66,y:155,color:"#60a5fa",layer:"section"},
+  {id:"downloads",label:"Downloads Section",file:"sections/downloads.py",x:336,y:155,color:"#60a5fa",layer:"section"},
+  {id:"settings",label:"Settings Section",file:"sections/settings.py",x:616,y:155,color:"#60a5fa",layer:"section"},
+  {id:"logs_section",label:"Logs Section",file:"sections/logs.py",x:886,y:155,color:"#60a5fa",layer:"section"},
+  {id:"url_validator",label:"URL Validator",file:"url_validator.py",x:66,y:248,color:"#34d399",layer:"core"},
+  {id:"downloader",label:"Downloader",file:"downloader.py",x:336,y:248,color:"#34d399",layer:"core"},
+  {id:"scheduler",label:"Scheduler",file:"scheduler.py",x:616,y:248,color:"#34d399",layer:"core"},
+  {id:"cookie_manager",label:"Cookie Manager",file:"cookie_manager.py",x:886,y:248,color:"#34d399",layer:"core"},
+  {id:"site_registry",label:"Site Registry",file:"sites/base.py",x:66,y:341,color:"#fbbf24",layer:"support"},
+  {id:"rate_limiter",label:"Rate Limiter",file:"rate_limiter.py",x:336,y:341,color:"#fbbf24",layer:"support"},
+  {id:"nas_monitor",label:"NAS Monitor",file:"nas_monitor.py",x:616,y:341,color:"#fbbf24",layer:"support"},
+  {id:"config_loader",label:"Config Loader",file:"config_loader.py",x:886,y:341,color:"#fbbf24",layer:"support"},
+  {id:"xcom",label:"X.com Adapter",file:"sites/xcom.py",x:36,y:434,color:"#f87171",layer:"adapter"},
+  {id:"pixiv",label:"Pixiv Adapter",file:"sites/pixiv.py",x:236,y:434,color:"#f87171",layer:"adapter"},
+  {id:"da",label:"DeviantArt Adapter",file:"sites/deviantart.py",x:436,y:434,color:"#f87171",layer:"adapter"},
+  {id:"db",label:"Database (SQLite)",file:"db.py · WAL mode",x:636,y:434,color:"#818cf8",layer:"infra"},
+  {id:"gallery_dl",label:"gallery-dl",file:"subprocess",x:876,y:434,color:"#818cf8",layer:"infra"},
+  {id:"nas",label:"NAS Storage",file:"NFS bind mount",x:206,y:527,color:"#78716c",layer:"external"},
+  {id:"models",label:"Models",file:"models.py · Artist, Job",x:476,y:527,color:"#78716c",layer:"external"},
+  {id:"bootstrap",label:"Bootstrap",file:"bootstrap.py",x:746,y:527,color:"#78716c",layer:"external"}
+];
+
+const flows=[
+  {
+    id:"startup",name:"App Startup",
+    desc:"Initializes the application when the Streamlit container starts",
+    color:"#a78bfa",
+    steps:[
+      {from:"streamlit",to:"bootstrap",label:"bootstrap()",detail:"Entry point calls bootstrap() on first session init"},
+      {from:"bootstrap",to:"config_loader",label:"load config.toml",detail:"Parses TOML into typed Config dataclass with tomllib"},
+      {from:"bootstrap",to:"db",label:"init schema + WAL",detail:"Creates tables, enables WAL mode, runs migrations via PRAGMA user_version"},
+      {from:"bootstrap",to:"db",label:"seed state defaults",detail:"Sets auth_session_valid=1, schema_version in state table"},
+      {from:"bootstrap",to:"db",label:"clean orphaned jobs",detail:"Marks stuck 'running' jobs as failed (container restart recovery)"},
+      {from:"bootstrap",to:"db",label:"prune old logs",detail:"Deletes logs older than retention.log_days (default 90)"},
+      {from:"config_loader",to:"streamlit",label:"Config object",detail:"Config stored in st.session_state for all components"},
+      {from:"streamlit",to:"scheduler",label:"create + start",detail:"APScheduler configured with cron from config, starts background thread"},
+      {from:"bootstrap",to:"site_registry",label:"init adapters",detail:"Registers XCom, Pixiv, DeviantArt adapters into the registry"}
+    ]
+  },
+  {
+    id:"add_artist",name:"Add Artist",
+    desc:"User adds a new artist by pasting a profile URL",
+    color:"#60a5fa",
+    steps:[
+      {from:"user",to:"streamlit",label:"paste URL",detail:"User enters URL (x.com, pixiv.net, deviantart.com) in Artists form"},
+      {from:"streamlit",to:"artists",label:"form submit",detail:"Artists section handles the add_artist form submission"},
+      {from:"artists",to:"url_validator",label:"validate_url(url)",detail:"Parses URL, extracts handle, checks against registered patterns"},
+      {from:"url_validator",to:"site_registry",label:"match_url()",detail:"Iterates adapters to find one that matches the URL pattern"},
+      {from:"site_registry",to:"url_validator",label:"matching adapter",detail:"Returns the SiteAdapter (XCom/Pixiv/DA) that matched"},
+      {from:"url_validator",to:"artists",label:"(handle, url, adapter)",detail:"Returns parsed handle, normalized URL, and matched adapter"},
+      {from:"artists",to:"db",label:"insert_artist()",detail:"Checks for duplicate source_url, inserts Artist record with site + handle"},
+      {from:"db",to:"artists",label:"artist_id",detail:"Returns new artist ID for reference"},
+      {from:"artists",to:"streamlit",label:"success + rerun",detail:"Displays confirmation toast and reruns to refresh artist list"}
+    ]
+  },
+  {
+    id:"remove_artist",name:"Remove Artist",
+    desc:"Deactivate an artist, optionally deleting their NAS files",
+    color:"#60a5fa",
+    steps:[
+      {from:"user",to:"artists",label:"click Remove / Delete Files",detail:"User clicks Remove (soft delete) or Delete Files (remove + rmtree)"},
+      {from:"artists",to:"db",label:"deactivate_artist(id)",detail:"Sets is_active = 0 (soft delete preserves job history and logs)"},
+      {from:"artists",to:"nas",label:"rmtree (if delete)",detail:"If 'Delete Files': shutil.rmtree /nas/inkwell/{handle}/ recursively"},
+      {from:"artists",to:"streamlit",label:"success + rerun",detail:"Displays confirmation and reruns to update artist list"}
+    ]
+  },
+  {
+    id:"download_single",name:"Download Single Artist",
+    desc:"Manually trigger a gallery-dl download for one artist",
+    color:"#34d399",
+    steps:[
+      {from:"user",to:"downloads",label:"select + Download",detail:"User picks an artist from dropdown and clicks 'Download Selected'"},
+      {from:"downloads",to:"downloader",label:"download_artist(artist, config, registry)",detail:"Launched in a background daemon thread to avoid blocking UI"},
+      {from:"downloader",to:"db",label:"get_running_job()",detail:"Job lock: checks for existing running job for this artist"},
+      {from:"downloader",to:"db",label:"insert_job(running)",detail:"Creates job record with status='running', triggered_by='manual'"},
+      {from:"downloader",to:"site_registry",label:"get(artist.site)",detail:"Retrieves the SiteAdapter for the artist's platform"},
+      {from:"downloader",to:"nas",label:"snapshot before",detail:"Walks artist directory to record existing files and sizes"},
+      {from:"downloader",to:"site_registry",label:"get config + auth + archive",detail:"Adapter provides gallery-dl config path, archive DB, and cookie/token files"},
+      {from:"downloader",to:"gallery_dl",label:"subprocess.run(gallery-dl ...)",detail:"Executes gallery-dl with --config, --dest, --download-archive, --cookies"},
+      {from:"gallery_dl",to:"nas",label:"write media files",detail:"Downloads to /nas/inkwell/{handle}/{year}/ via NFS bind mount"},
+      {from:"downloader",to:"nas",label:"snapshot after + diff",detail:"Walks directory again, diffs to count new files and total bytes"},
+      {from:"downloader",to:"db",label:"update_job(completion)",detail:"Records file_count, total_bytes, status='success'"},
+      {from:"downloader",to:"rate_limiter",label:"record_success()",detail:"Decays cooldown multiplier on successful download"}
+    ]
+  },
+  {
+    id:"download_all",name:"Download All Artists",
+    desc:"Sequentially download all active artists with pre-flight checks",
+    color:"#34d399",
+    steps:[
+      {from:"user",to:"downloads",label:"click Download All Now",detail:"User clicks the primary 'Download All Now' button"},
+      {from:"downloads",to:"downloader",label:"download_all(config, registry)",detail:"Launched in background thread"},
+      {from:"downloader",to:"db",label:"get_active_artists()",detail:"Fetches all artists with is_active=1 ordered by added_at"},
+      {from:"downloader",to:"nas_monitor",label:"check_nas_with_retry()",detail:"Pre-flight: verifies NAS mount is writable with 4 retries (1s,2s,4s,8s)"},
+      {from:"nas_monitor",to:"nas",label:"write + delete test file",detail:"Creates .inkwell_nas_check file to confirm NFS mount is alive"},
+      {from:"downloader",to:"rate_limiter",label:"is_site_paused(site)",detail:"Checks if site cooldown multiplier >= pause_threshold (6.0)"},
+      {from:"downloader",to:"downloader",label:"cooldown + jitter",detail:"Sleeps 30-60s (random) × cooldown multiplier between artists"},
+      {from:"downloader",to:"gallery_dl",label:"per-artist subprocess",detail:"For each non-paused artist, runs the single-artist download flow"},
+      {from:"downloader",to:"db",label:"insert_log(summary)",detail:"Logs total artists processed and failure count"}
+    ]
+  },
+  {
+    id:"scheduled_download",name:"Scheduled Download",
+    desc:"Nightly automatic download triggered by APScheduler cron",
+    color:"#34d399",
+    steps:[
+      {from:"scheduler",to:"downloader",label:"download_all(config, registry)",detail:"APScheduler fires cron trigger (default: '0 3 * * *' = 3 AM nightly)"},
+      {from:"downloader",to:"db",label:"get_active_artists()",detail:"Fetches active artist list from database"},
+      {from:"downloader",to:"nas_monitor",label:"NAS pre-flight check",detail:"Verifies NAS availability before starting the run"},
+      {from:"downloader",to:"db",label:"insert_job(scheduled)",detail:"Each job created with triggered_by='scheduled'"},
+      {from:"downloader",to:"gallery_dl",label:"run gallery-dl per artist",detail:"Sequential subprocess execution for each artist"},
+      {from:"gallery_dl",to:"nas",label:"write files",detail:"Media files written to NAS storage"},
+      {from:"downloader",to:"db",label:"update_job(results)",detail:"Records file_count, total_bytes, status per artist"},
+      {from:"downloader",to:"db",label:"insert_log(run summary)",detail:"Logs 'Scheduled run completed: N artists, M failures'"}
+    ]
+  },
+  {
+    id:"upload_auth",name:"Upload Auth Credentials",
+    desc:"Upload cookies or tokens for site authentication",
+    color:"#fbbf24",
+    steps:[
+      {from:"user",to:"settings",label:"upload file / paste token",detail:"User uploads cookies.txt or enters refresh token in Settings"},
+      {from:"settings",to:"cookie_manager",label:"save_file(path, content, adapter)",detail:"Writes auth file to /app/data/ named Docker volume"},
+      {from:"cookie_manager",to:"db",label:"set_state(auth_valid=1)",detail:"Marks auth_valid:{site} = '1' via adapter.mark_auth_valid()"},
+      {from:"settings",to:"streamlit",label:"rerun",detail:"Page reruns to refresh auth status display"}
+    ]
+  },
+  {
+    id:"rate_limit",name:"Rate Limit Hit",
+    desc:"Site returns HTTP 429 — rate limit escalation",
+    color:"#f87171",
+    steps:[
+      {from:"gallery_dl",to:"downloader",label:"exit code ≠ 0, stderr",detail:"gallery-dl subprocess returns non-zero with rate limit in stderr"},
+      {from:"downloader",to:"site_registry",label:"detect_rate_limit_error(stderr)",detail:"Adapter checks stderr for '429' or 'rate limit' patterns"},
+      {from:"downloader",to:"rate_limiter",label:"record_hit(site, config)",detail:"Increments hit_count, multiplies cooldown (step=1.5×, max=8×)"},
+      {from:"rate_limiter",to:"db",label:"persist SiteRateState",detail:"Saves {hit_count, cooldown_multiplier} to state table as JSON"},
+      {from:"downloader",to:"db",label:"update_job(failed)",detail:"Marks job failed with error_message='Rate limited by site'"},
+      {from:"downloader",to:"db",label:"insert_log(WARNING)",detail:"Logs rate limit event for the artist"}
+    ]
+  },
+  {
+    id:"auth_error",name:"Auth Error Detection",
+    desc:"Site returns 401/login error — auth invalidation + dashboard alert",
+    color:"#f87171",
+    steps:[
+      {from:"gallery_dl",to:"downloader",label:"stderr with 401/login",detail:"gallery-dl returns auth failure in stderr output"},
+      {from:"downloader",to:"site_registry",label:"detect_auth_error(stderr)",detail:"Adapter checks for 'login', 'unauthorized', '401', 'token'"},
+      {from:"downloader",to:"site_registry",label:"mark_auth_invalid()",detail:"Sets auth_valid:{site} = '0' in state table immediately"},
+      {from:"site_registry",to:"db",label:"set_state('0')",detail:"Persists invalid auth flag — no need to wait for cookie expiry"},
+      {from:"downloader",to:"db",label:"update_job(failed, auth error)",detail:"Marks job failed with error_message='Auth error'"},
+      {from:"streamlit",to:"site_registry",label:"is_auth_valid() check",detail:"Dashboard reads auth state for each adapter on every render"},
+      {from:"streamlit",to:"user",label:"RE-AUTHENTICATE banner",detail:"Shows critical red banner with site name requiring credential refresh"}
+    ]
+  },
+  {
+    id:"view_logs",name:"View Logs",
+    desc:"Browse and filter structured application logs",
+    color:"#60a5fa",
+    steps:[
+      {from:"user",to:"logs_section",label:"set filters",detail:"User selects level (INFO/WARNING/ERROR) and source filters"},
+      {from:"logs_section",to:"db",label:"get_logs(level, source, limit)",detail:"Queries logs table with WHERE clauses and ORDER BY timestamp DESC"},
+      {from:"db",to:"logs_section",label:"log entries[]",detail:"Returns matching log records with timestamp, level, source, message"},
+      {from:"logs_section",to:"user",label:"render colored list",detail:"Displays entries with colored level icons (green/yellow/red)"}
+    ]
+  },
+  {
+    id:"cookie_expiry",name:"Cookie Expiry Warning",
+    desc:"Dashboard warns when credentials are approaching expiry",
+    color:"#fbbf24",
+    steps:[
+      {from:"streamlit",to:"site_registry",label:"all_adapters()",detail:"Iterates all registered adapters to check auth status"},
+      {from:"streamlit",to:"cookie_manager",label:"is_file_expired(path, days)",detail:"Checks each adapter's auth file modification time"},
+      {from:"cookie_manager",to:"nas",label:"stat auth file",detail:"Reads file mtime from the named Docker volume"},
+      {from:"cookie_manager",to:"streamlit",label:"expired: bool",detail:"Returns true if file age > cookies.expiry_warning_days (default 30)"},
+      {from:"streamlit",to:"user",label:"warning banner",detail:"Shows yellow warning with site name and days since upload"}
+    ]
+  },
+  {
+    id:"download_retry",name:"Download Retry with Backoff",
+    desc:"Per-artist retry with exponential backoff on transient failures",
+    color:"#34d399",
+    steps:[
+      {from:"downloader",to:"gallery_dl",label:"attempt N of retry_attempts",detail:"Runs gallery-dl subprocess (default 3 attempts)"},
+      {from:"gallery_dl",to:"downloader",label:"non-zero exit / timeout",detail:"Subprocess fails (not rate-limit, not auth — generic error)"},
+      {from:"downloader",to:"db",label:"insert_log(WARNING, retry)",detail:"Logs retry attempt with error details"},
+      {from:"downloader",to:"downloader",label:"sleep backoff[attempt]",detail:"Waits 5s → 15s → 45s (configurable retry_backoff array)"},
+      {from:"downloader",to:"gallery_dl",label:"retry subprocess",detail:"Re-runs gallery-dl for the same artist"},
+      {from:"downloader",to:"db",label:"update_job(failed, all retries)",detail:"If all attempts fail: marks job failed with last error message"}
+    ]
+  }
+];
+
+const compMap={};
+components.forEach(c=>compMap[c.id]=c);
+
+let activeFlow=null;
+let activeStep=-1;
+const compEls={};
+const svgNS="http://www.w3.org/2000/svg";
+
+function init(){
+  renderComponents();
+  renderFlowButtons();
+  document.getElementById("reset-btn").addEventListener("click",clearSelection);
+}
+
+function renderComponents(){
+  const diagram=document.getElementById("diagram");
+  components.forEach(c=>{
+    const el=document.createElement("div");
+    el.className="comp";
+    el.id="comp-"+c.id;
+    el.style.left=c.x+"px";
+    el.style.top=c.y+"px";
+    el.style.setProperty("--comp-color",c.color);
+    el.innerHTML=`<div class="comp-label" style="color:${c.color}">${c.label}</div>`+
+      (c.file?`<div class="comp-file">${c.file}</div>`:"");
+    diagram.appendChild(el);
+    compEls[c.id]=el;
+  });
+}
+
+function renderFlowButtons(){
+  const list=document.getElementById("flow-list");
+  flows.forEach(f=>{
+    const btn=document.createElement("button");
+    btn.className="flow-btn";
+    btn.dataset.flow=f.id;
+    btn.innerHTML=`<span class="flow-name" style="color:${f.color}">${f.name}</span><span class="flow-desc">${f.desc}</span>`;
+    btn.addEventListener("click",()=>selectFlow(f.id));
+    list.appendChild(btn);
+  });
+}
+
+function selectFlow(flowId){
+  const flow=flows.find(f=>f.id===flowId);
+  if(!flow)return;
+  activeFlow=flow;
+  activeStep=-1;
+  document.querySelectorAll(".flow-btn").forEach(b=>{
+    b.classList.toggle("active",b.dataset.flow===flowId);
+  });
+  const involved=new Set();
+  flow.steps.forEach(s=>{involved.add(s.from);involved.add(s.to)});
+  components.forEach(c=>{
+    const el=compEls[c.id];
+    el.classList.toggle("dimmed",!involved.has(c.id));
+    el.classList.toggle("active",involved.has(c.id));
+  });
+  drawArrows(flow);
+  renderDetailPanel(flow);
+}
+
+function clearSelection(){
+  activeFlow=null;
+  activeStep=-1;
+  document.querySelectorAll(".flow-btn").forEach(b=>b.classList.remove("active"));
+  components.forEach(c=>{
+    compEls[c.id].classList.remove("dimmed","active");
+  });
+  clearArrows();
+  document.getElementById("detail-inner").innerHTML='<div class="empty-state">Select a flow from the sidebar to see how data moves through the system</div>';
+}
+
+function clearArrows(){
+  const svg=document.getElementById("arrows");
+  svg.querySelectorAll(".arrow-group").forEach(g=>g.remove());
+  document.querySelectorAll(".step-badge").forEach(b=>b.remove());
+}
+
+function drawArrows(flow){
+  clearArrows();
+  const svg=document.getElementById("arrows");
+  const diagram=document.getElementById("diagram");
+  const pairCount={};
+
+  flow.steps.forEach((step,i)=>{
+    const src=compMap[step.from];
+    const tgt=compMap[step.to];
+    if(!src||!tgt)return;
+
+    const key=step.from+"→"+step.to;
+    pairCount[key]=(pairCount[key]||0)+1;
+    const offset=pairCount[key]-1;
+
+    const path=computePath(src,tgt,offset);
+    const mid=computeMidpoint(path);
+
+    const g=document.createElementNS(svgNS,"g");
+    g.classList.add("arrow-group");
+    g.style.setProperty("--arrow-color",flow.color);
+
+    const pathEl=document.createElementNS(svgNS,"path");
+    pathEl.setAttribute("d",path);
+    pathEl.classList.add("arrow-line","visible","flowing");
+    pathEl.style.animationDelay=(i*0.1)+"s";
+
+    const headEl=document.createElementNS(svgNS,"polygon");
+    headEl.classList.add("arrow-head","visible");
+    const headSize=6;
+    const angle=computeEndAngle(path);
+    const ex=parseFloat(path.match(/[MCL]\s*([\d.]+)[,\s]+([\d.]+)\s*$/)?.[1]||0)||0;
+    const tipX=mid.ex;
+    const tipY=mid.ey;
+    const p1x=tipX-headSize*Math.cos(angle-0.4);
+    const p1y=tipY-headSize*Math.sin(angle-0.4);
+    const p2x=tipX-headSize*Math.cos(angle+0.4);
+    const p2y=tipY-headSize*Math.sin(angle+0.4);
+    headEl.setAttribute("points",`${tipX},${tipY} ${p1x},${p1y} ${p2x},${p2y}`);
+
+    g.appendChild(pathEl);
+    g.appendChild(headEl);
+    svg.appendChild(g);
+
+    const badge=document.createElement("div");
+    badge.className="step-badge visible";
+    badge.style.left=(mid.mx-11)+"px";
+    badge.style.top=(mid.my-11)+"px";
+    badge.style.setProperty("--arrow-color",flow.color);
+    badge.textContent=i+1;
+    badge.title=step.label;
+    badge.addEventListener("click",()=>highlightStep(i));
+    diagram.appendChild(badge);
+  });
+}
+
+function computePath(src,tgt,offset){
+  if(src.id===tgt.id){
+    const cx=src.x+BOX_W;
+    const cy=src.y+BOX_H/2;
+    const r=20+offset*8;
+    return `M ${cx} ${cy-4} C ${cx+r} ${cy-r} ${cx+r} ${cy+r} ${cx} ${cy+4}`;
+  }
+  const scx=src.x+BOX_W/2, scy=src.y+BOX_H/2;
+  const tcx=tgt.x+BOX_W/2, tcy=tgt.y+BOX_H/2;
+  const dx=tcx-scx, dy=tcy-scy;
+  let sx,sy,ex,ey;
+
+  if(Math.abs(dy)>=Math.abs(dx)){
+    if(dy>0){sx=scx+offset*6;sy=src.y+BOX_H;ex=tcx+offset*6;ey=tgt.y}
+    else{sx=scx+offset*6;sy=src.y;ex=tcx+offset*6;ey=tgt.y+BOX_H}
+  }else{
+    if(dx>0){sx=src.x+BOX_W;sy=scy+offset*6;ex=tgt.x;ey=tcy+offset*6}
+    else{sx=src.x;sy=scy+offset*6;ex=tgt.x+BOX_W;ey=tcy+offset*6}
+  }
+
+  if(Math.abs(dy)>=Math.abs(dx)){
+    const midY=(sy+ey)/2;
+    return `M ${sx} ${sy} C ${sx} ${midY} ${ex} ${midY} ${ex} ${ey}`;
+  }else{
+    const midX=(sx+ex)/2;
+    return `M ${sx} ${sy} C ${midX} ${sy} ${midX} ${ey} ${ex} ${ey}`;
+  }
+}
+
+function computeMidpoint(path){
+  const nums=path.match(/[\d.]+/g).map(Number);
+  const sx=nums[0],sy=nums[1],ex=nums[nums.length-2],ey=nums[nums.length-1];
+  if(nums.length>=6){
+    const cx1=nums[2],cy1=nums[3],cx2=nums[4],cy2=nums[5];
+    const t=0.5;
+    const mx=(1-t)*(1-t)*(1-t)*sx+3*(1-t)*(1-t)*t*cx1+3*(1-t)*t*t*cx2+t*t*t*ex;
+    const my=(1-t)*(1-t)*(1-t)*sy+3*(1-t)*(1-t)*t*cy1+3*(1-t)*t*t*cy2+t*t*t*ey;
+    return {mx,my,ex,ey};
+  }
+  return {mx:(sx+ex)/2,my:(sy+ey)/2,ex,ey};
+}
+
+function computeEndAngle(path){
+  const nums=path.match(/[\d.]+/g).map(Number);
+  const n=nums.length;
+  if(n<4)return 0;
+  const px=nums[n-4],py=nums[n-3],ex=nums[n-2],ey=nums[n-1];
+  return Math.atan2(ey-py,ex-px);
+}
+
+function renderDetailPanel(flow){
+  const inner=document.getElementById("detail-inner");
+  let html=`<h2 style="color:${flow.color}">${flow.name}</h2><div class="detail-desc">${flow.desc}</div>`;
+  flow.steps.forEach((s,i)=>{
+    const src=compMap[s.from], tgt=compMap[s.to];
+    const srcLabel=src?src.label:s.from;
+    const tgtLabel=tgt?tgt.label:s.to;
+    html+=`<div class="step-row" data-step="${i}" onclick="highlightStep(${i})">`+
+      `<div class="step-num">${i+1}</div>`+
+      `<div class="step-info">`+
+        `<div class="step-title">${srcLabel} <span class="arrow">&rarr;</span> ${tgtLabel} <span class="step-tag">${s.label}</span></div>`+
+        `<div class="step-detail">${s.detail}</div>`+
+      `</div></div>`;
+  });
+  inner.innerHTML=html;
+}
+
+function highlightStep(idx){
+  if(!activeFlow)return;
+  activeStep=idx;
+  document.querySelectorAll(".step-row").forEach(r=>{
+    r.classList.toggle("highlight",parseInt(r.dataset.step)===idx);
+  });
+  document.querySelectorAll(".step-badge").forEach(b=>{
+    b.classList.toggle("highlight",parseInt(b.textContent)===idx+1);
+  });
+  const row=document.querySelector(`.step-row[data-step="${idx}"]`);
+  if(row)row.scrollIntoView({behavior:"smooth",block:"nearest"});
+}
+
+window.highlightStep=highlightStep;
+document.addEventListener("DOMContentLoaded",init);
+</script>
+</body>
+</html>
