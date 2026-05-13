@@ -17,6 +17,8 @@ SITE_LABELS = {
     "deviantart": "DeviantArt",
 }
 
+PAGE_SIZE = 20
+
 
 def render_artists():
     config = st.session_state.config
@@ -63,7 +65,28 @@ def render_artists():
     total_bytes = sum(disk_usage.get(a.handle, (0, 0))[1] for a in artists)
     st.caption(f"Total: {total_files:,} files · {_format_bytes(total_bytes)} across {len(artists)} artist(s)")
 
-    for artist in artists:
+    # Pagination
+    total_pages = max(1, -(-len(artists) // PAGE_SIZE))  # ceil division
+    page = st.session_state.get("artist_page", 0)
+    page = min(page, total_pages - 1)
+    page_start = page * PAGE_SIZE
+    page_end = page_start + PAGE_SIZE
+    page_artists = artists[page_start:page_end]
+
+    if total_pages > 1:
+        col_prev, col_info, col_next = st.columns([1, 2, 1])
+        with col_prev:
+            if st.button("Prev", disabled=(page == 0), key="artist_page_prev"):
+                st.session_state.artist_page = page - 1
+                st.rerun()
+        with col_info:
+            st.markdown(f"<div style='text-align:center'>Page {page + 1} of {total_pages}</div>", unsafe_allow_html=True)
+        with col_next:
+            if st.button("Next", disabled=(page >= total_pages - 1), key="artist_page_next"):
+                st.session_state.artist_page = page + 1
+                st.rerun()
+
+    for artist in page_artists:
         adapter = registry.get(artist.site)
         display = adapter.get_display_handle(artist)
         site_label = SITE_LABELS.get(artist.site, artist.site)

@@ -3,7 +3,7 @@
 ## Planned
 
 - [x] Show last download time per artist in the single-artist dropdown
-- [ ] Paginate or collapse artist list to prevent UI bloat at scale
+- [x] Paginate or collapse artist list to prevent UI bloat at scale
 - [ ] MkDocs + Material theme documentation site, deployed to GitHub Pages
 - [ ] Image gallery integration (Piwigo, Komga)
 - [ ] Discord/Telegram notifications on new archival
