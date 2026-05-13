@@ -10,6 +10,7 @@
 - [ ] Image gallery integration (Piwigo, Komga)
 - [ ] Discord/Telegram notifications on new archival
 - [ ] Automated SQLite dumps and NAS snapshot scheduling
+- [ ] Auto-zip downloaded media per artist per year to reduce small-file load on NAS hard drives
 
 ## Completed
 
