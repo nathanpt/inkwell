@@ -7,7 +7,7 @@ from src.models import Artist
 from src.sites.base import SiteAdapter
 
 PIXIV_PATTERN = re.compile(
-    r"^https?://www\.pixiv\.net/users/(\d+)/?$"
+    r"^https?://www\.pixiv\.net/(?:[a-z]{2}/)?users/(\d+)/?$"
 )
 
 CONFIG_PATH = Path("/app/config/gallery-dl.pixiv.conf")

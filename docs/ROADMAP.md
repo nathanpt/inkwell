@@ -9,6 +9,7 @@
 
 ## Completed
 
+- [x] Accept localized Pixiv URLs (e.g. /en/users/12345)
 - [x] Refactor Streamlit UI layout (horizontal button alignment, two-tier downloads, vertical_alignment)
 - [x] Fix cookies.txt upload rerun loop (file_uploader retained state across reruns)
 - [x] Refactor to connection-per-operation pattern (eliminate SQLite threading errors)

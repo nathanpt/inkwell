@@ -83,6 +83,8 @@ class TestPixivAdapter:
 
     def test_match_valid(self):
         assert self.adapter.match_url("https://www.pixiv.net/users/12345")
+        assert self.adapter.match_url("https://www.pixiv.net/en/users/12345")
+        assert self.adapter.match_url("https://www.pixiv.net/ja/users/12345")
 
     def test_match_invalid(self):
         assert not self.adapter.match_url("https://x.com/artist")
