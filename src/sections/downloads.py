@@ -112,9 +112,11 @@ def _artist_label(artist, registry) -> str:
     from src.models import Artist
     try:
         adapter = registry.get(artist.site)
-        return adapter.get_display_handle(artist)
+        display = adapter.get_display_handle(artist)
     except ValueError:
-        return artist.handle
+        display = artist.handle
+    last = artist.last_scan_at or "never"
+    return f"{display}  (last: {last})"
 
 
 def _display_handle(handle: str, site: str, registry) -> str:
