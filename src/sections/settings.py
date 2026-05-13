@@ -17,7 +17,7 @@ def render_settings():
     # Config display
     st.subheader("Configuration")
     st.code(f"""
-NAS path: {config.nas.mount_path}
+NAS path: {config.nas.display_path or config.nas.mount_path}
 Schedule: {config.schedule.cron}
 Retry attempts: {config.download.retry_attempts}
 Timeout: {config.download.timeout}s

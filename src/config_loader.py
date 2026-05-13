@@ -10,6 +10,7 @@ DEFAULT_CONFIG_PATH = Path("/app/config/config.toml")
 @dataclass
 class NASConfig:
     mount_path: str = "/nas/inkwell"
+    display_path: str | None = None
 
 
 @dataclass
