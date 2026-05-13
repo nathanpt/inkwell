@@ -6,7 +6,7 @@ from src import db
 
 
 def render_logs():
-    conn = st.session_state.conn
+    conn = db.get_connection(st.session_state.db_path)
 
     col1, col2 = st.columns(2)
     with col1:

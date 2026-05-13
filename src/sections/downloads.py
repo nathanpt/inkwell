@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -13,34 +14,45 @@ from src.url_validator import get_registry
 logger = logging.getLogger(__name__)
 
 
-def _run_in_thread(target, args):
-    import sqlite3
-    conn = args[0]
-
+def _run_in_thread(target, db_path: Path, config, registry, extra_args=None):
+    """Run target in a background thread with its own DB connection."""
     def wrapper():
+        conn = db.get_connection(db_path)
         try:
-            target(*args)
+            target(conn, *extra_args)
         except Exception as e:
             logger.exception("Background download thread crashed: %s", e)
             try:
                 db.insert_log(conn, "ERROR", "downloader", f"Thread crashed: {e}")
             except Exception:
                 pass
+        finally:
+            conn.close()
+
     t = threading.Thread(target=wrapper, daemon=True)
     t.start()
     return t
 
 
 def render_downloads():
-    conn = st.session_state.conn
+    db_path = st.session_state.db_path
+    conn = db.get_connection(db_path)
     config = st.session_state.config
     registry = get_registry()
 
+    try:
+        _render_downloads_inner(conn, db_path, config, registry)
+    finally:
+        conn.close()
+
+
+def _render_downloads_inner(conn, db_path: Path, config, registry):
     # Download controls
     col1, col2 = st.columns(2)
     with col1:
         if st.button("Download All Now"):
-            _run_in_thread(download_all, (conn, config, registry, "manual"))
+            _run_in_thread(download_all, db_path, config, registry,
+                          extra_args=(config, registry, "manual"))
             st.info("Download started in background. Refresh to see progress.")
     with col2:
         artists = db.get_active_artists(conn)
@@ -53,7 +65,8 @@ def render_downloads():
             )
             if st.button("Download Selected"):
                 artist = next(a for a in artists if a.id == selected[0])
-                _run_in_thread(download_artist, (conn, artist, config, registry, "manual"))
+                _run_in_thread(download_artist, db_path, config, registry,
+                              extra_args=(artist, config, registry, "manual"))
                 st.info(f"Download started for {registry.get(artist.site).get_display_handle(artist)}")
 
     # Job history

@@ -19,7 +19,7 @@ SITE_LABELS = {
 
 
 def render_artists():
-    conn = st.session_state.conn
+    conn = db.get_connection(st.session_state.db_path)
     config = st.session_state.config
     registry = get_registry()
 

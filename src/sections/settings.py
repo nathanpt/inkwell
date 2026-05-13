@@ -12,7 +12,7 @@ from src.sites.deviantart import DeviantArtAdapter
 
 
 def render_settings():
-    conn = st.session_state.conn
+    conn = db.get_connection(st.session_state.db_path)
     config = st.session_state.config
 
     # Config display

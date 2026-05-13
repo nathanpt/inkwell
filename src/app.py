@@ -5,26 +5,33 @@ import logging
 import bcrypt
 import streamlit as st
 
+from src import db
 from src.bootstrap import bootstrap
 from src.url_validator import get_registry
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 
 
+def _get_conn() -> sqlite3.Connection:
+    """Return a fresh SQLite connection for the current thread."""
+    return db.get_connection(st.session_state.db_path)
+
+
 def _init_session_state():
     if "authenticated" not in st.session_state:
         st.session_state.authenticated = False
-    if "conn" not in st.session_state:
+    if "db_path" not in st.session_state:
         conn, config = bootstrap()
-        st.session_state.conn = conn
+        st.session_state.db_path = db.DEFAULT_DB_PATH
         st.session_state.config = config
+        conn.close()
 
         # Initialize site registry
         get_registry()
 
         from src.scheduler import create_scheduler
 
-        scheduler = create_scheduler(conn, config)
+        scheduler = create_scheduler(st.session_state.db_path, config)
         scheduler.start()
         st.session_state.scheduler = scheduler
 
@@ -51,7 +58,7 @@ def _render_login():
 
 
 def _render_auth_banner():
-    conn = st.session_state.conn
+    conn = _get_conn()
     config = st.session_state.config
     registry = get_registry()
 

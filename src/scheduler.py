@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from pathlib import Path
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -29,7 +30,7 @@ def parse_cron(cron_expr: str) -> dict:
 
 
 def create_scheduler(
-    conn: sqlite3.Connection, config: Config
+    db_path: Path, config: Config
 ) -> BackgroundScheduler:
     """Create and configure the APScheduler with the cron schedule from config."""
     scheduler = BackgroundScheduler()
@@ -41,7 +42,7 @@ def create_scheduler(
         _scheduled_run,
         trigger=trigger,
         id="inkwell_scheduled_download",
-        kwargs={"conn": conn, "config": config, "registry": create_registry()},
+        kwargs={"db_path": db_path, "config": config, "registry": create_registry()},
         replace_existing=True,
     )
 
@@ -49,19 +50,23 @@ def create_scheduler(
     return scheduler
 
 
-def _scheduled_run(conn: sqlite3.Connection, config: Config, registry: SiteRegistry) -> None:
+def _scheduled_run(db_path: Path, config: Config, registry: SiteRegistry) -> None:
     """Callback for the scheduled download job."""
-    logger.info("Scheduled download run starting")
-    db.insert_log(conn, "INFO", "scheduler", "Scheduled download run starting")
+    conn = db.get_connection(db_path)
     try:
-        jobs = download_all(conn, config, registry, triggered_by="scheduled")
-        succeeded = sum(1 for j in jobs if j.status == "failed")
-        db.insert_log(
-            conn,
-            "INFO",
-            "scheduler",
-            f"Scheduled run completed: {len(jobs)} artists, {succeeded} failures",
-        )
-    except Exception as e:
-        logger.exception("Scheduled run failed with exception")
-        db.insert_log(conn, "ERROR", "scheduler", f"Scheduled run failed: {e}")
+        logger.info("Scheduled download run starting")
+        db.insert_log(conn, "INFO", "scheduler", "Scheduled download run starting")
+        try:
+            jobs = download_all(conn, config, registry, triggered_by="scheduled")
+            succeeded = sum(1 for j in jobs if j.status == "failed")
+            db.insert_log(
+                conn,
+                "INFO",
+                "scheduler",
+                f"Scheduled run completed: {len(jobs)} artists, {succeeded} failures",
+            )
+        except Exception as e:
+            logger.exception("Scheduled run failed with exception")
+            db.insert_log(conn, "ERROR", "scheduler", f"Scheduled run failed: {e}")
+    finally:
+        conn.close()

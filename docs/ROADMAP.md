@@ -9,6 +9,7 @@
 
 ## Completed
 
+- [x] Fix SQLite threading error — stop sharing connection across Streamlit threads
 - [x] Fix concurrent SQLite writes from progress polling thread (use separate connection)
 - [x] Fix Docker Compose buildx warning (pre-built GHCR image + CI workflow)
 - [x] Adaptive scheduling when rate limits are frequent
