@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 
@@ -56,6 +57,13 @@ def render_artists():
         st.info("No artists tracked yet. Add one above.")
         return
 
+    disk_usage = _scan_disk_usage(Path(config.nas.mount_path))
+
+    # Total summary
+    total_files = sum(disk_usage.get(a.handle, (0, 0))[0] for a in artists)
+    total_bytes = sum(disk_usage.get(a.handle, (0, 0))[1] for a in artists)
+    st.caption(f"Total: {total_files:,} files · {_format_bytes(total_bytes)} across {len(artists)} artist(s)")
+
     for artist in artists:
         adapter = registry.get(artist.site)
         display = adapter.get_display_handle(artist)
@@ -66,10 +74,9 @@ def render_artists():
             last_scan = artist.last_scan_at or "Never"
             st.markdown(f"**{display}** ({site_label}) — last scan: {last_scan}")
         with col2:
-            artist_dir = Path(config.nas.mount_path) / artist.handle
-            if artist_dir.exists():
-                file_count = sum(1 for _ in artist_dir.rglob("*") if _.is_file())
-                st.caption(f"{file_count} file(s)")
+            count, size = disk_usage.get(artist.handle, (0, 0))
+            if count > 0:
+                st.caption(f"{count:,} file(s) · {_format_bytes(size)}")
         with col3:
             if st.button("Remove", key=f"rm_{artist.id}"):
                 db.deactivate_artist(conn, artist.id)
@@ -78,7 +85,40 @@ def render_artists():
 
             if st.button("Delete Files", key=f"del_{artist.id}"):
                 db.deactivate_artist(conn, artist.id)
+                artist_dir = Path(config.nas.mount_path) / artist.handle
                 if artist_dir.exists():
                     shutil.rmtree(artist_dir)
                 st.success(f"Removed {display} and deleted files")
                 st.rerun()
+
+
+def _scan_disk_usage(nas_path: Path) -> dict[str, tuple[int, int]]:
+    """Walk NAS mount once, return {artist_handle: (file_count, total_bytes)}."""
+    usage: dict[str, tuple[int, int]] = {}
+    if not nas_path.exists():
+        return usage
+    for entry in os.scandir(nas_path):
+        if not entry.is_dir(follow_symlinks=False):
+            continue
+        file_count = 0
+        total_bytes = 0
+        for root, _, files in os.walk(entry.path):
+            for f in files:
+                try:
+                    total_bytes += os.path.getsize(os.path.join(root, f))
+                    file_count += 1
+                except OSError:
+                    continue
+        if file_count > 0:
+            usage[entry.name] = (file_count, total_bytes)
+    return usage
+
+
+def _format_bytes(n: int) -> str:
+    if n == 0:
+        return "0 B"
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024:
+            return f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} TB"

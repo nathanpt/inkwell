@@ -7,7 +7,7 @@
 ## Planned
 
 - [ ] MkDocs + Material theme documentation site, deployed to GitHub Pages
-- [ ] Disk usage stats per artist in the dashboard
+- [x] Disk usage stats per artist in the dashboard
 - [x] Download history with file count and bytes columns
 - [x] Adaptive scheduling when rate limits are frequent
 
