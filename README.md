@@ -39,6 +39,8 @@ This is required on first launch. The password is hashed with bcrypt and stored 
 
 ### 3. Start the container
 
+> **Important:** The `config.toml` and `gallery-dl.*.conf` files must exist in the same directory as `compose.yaml` before starting. Docker will create directories instead of files at bind mount points if the source files are missing.
+
 ```bash
 docker compose pull && docker compose up -d
 ```

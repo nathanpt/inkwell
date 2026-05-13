@@ -14,10 +14,25 @@ DATA_DIR = Path("/app/data")
 CONFIG_DIR = Path("/app/config")
 
 
+_bootstrap_done = False
+
+
 def bootstrap(config_path: Path | None = None) -> tuple[sqlite3.Connection, Config]:
     import sqlite3
 
-    config = load_config(config_path or (CONFIG_DIR / "config.toml"))
+    global _bootstrap_done
+
+    config_file = config_path or (CONFIG_DIR / "config.toml")
+
+    if config_file.is_dir():
+        raise RuntimeError(
+            f"{config_file} is a directory, not a file. "
+            "This usually happens when the host file doesn't exist — "
+            "Docker creates a directory at the bind mount point. "
+            "Copy config.toml from the repo to your host before starting the container."
+        )
+
+    config = load_config(config_file)
 
     # 1. Verify /app/data/ is local filesystem (not NFS bind mount)
     _verify_local_storage(DATA_DIR)
@@ -29,10 +44,12 @@ def bootstrap(config_path: Path | None = None) -> tuple[sqlite3.Connection, Conf
     # 3. Seed state defaults
     db.seed_state(conn)
 
-    # 4. Clean orphaned jobs from ungraceful shutdowns
-    orphans = db.clean_orphaned_jobs(conn)
-    if orphans:
-        logger.info("Cleaned %d orphaned job(s)", orphans)
+    # 4. Clean orphaned jobs — only on first bootstrap in this process
+    if not _bootstrap_done:
+        orphans = db.clean_orphaned_jobs(conn)
+        if orphans:
+            logger.info("Cleaned %d orphaned job(s)", orphans)
+        _bootstrap_done = True
 
     # 5. Prune old logs
     pruned = db.prune_old_logs(conn, config.retention.log_days)
@@ -71,9 +88,9 @@ def _verify_local_storage(data_dir: Path) -> None:
 
 
 def _verify_config_files() -> None:
-    gallery_dl_conf = CONFIG_DIR / "gallery-dl.conf"
-    if not gallery_dl_conf.exists():
+    configs = list(CONFIG_DIR.glob("gallery-dl.*.conf"))
+    if not configs:
         raise FileNotFoundError(
-            f"gallery-dl.conf not found at {gallery_dl_conf}. "
-            "Ensure it is bind-mounted into the container."
+            f"No gallery-dl site configs found in {CONFIG_DIR}. "
+            "Ensure at least one gallery-dl.<site>.conf is bind-mounted."
         )
