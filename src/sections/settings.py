@@ -116,15 +116,9 @@ def _render_cookie_section(adapter, path, label):
 
     key = f"upload_{adapter.name}"
 
-    def _on_upload():
-        uploaded = st.session_state[key]
-        if uploaded is not None:
-            save_file(path, uploaded.read(), adapter)
-            st.session_state[key] = None
-
     st.file_uploader(
         f"Upload {label}",
         type=["txt"],
         key=key,
-        on_change=_on_upload,
+        on_change=lambda: save_file(path, st.session_state[key].read(), adapter),
     )
