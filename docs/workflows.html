@@ -33,7 +33,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
 
 /* Graph */
 .graph-wrapper{flex:1;overflow:auto;position:relative}
-.graph-container{position:relative;width:1300px;height:700px;margin:16px auto}
+.graph-container{position:relative;width:1400px;height:750px;margin:16px auto}
 .graph-container svg{position:absolute;top:0;left:0;pointer-events:none;z-index:1}
 
 /* Nodes */
@@ -91,7 +91,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-seri
     <div class="legend" id="legend"></div>
     <div class="graph-wrapper">
       <div class="graph-container" id="graph">
-        <svg id="svg" width="1300" height="700"></svg>
+        <svg id="svg" width="1400" height="750"></svg>
         <div id="nodes"></div>
       </div>
     </div>
@@ -141,6 +141,8 @@ const NODES = [
   { id:"database",     label:"Database",        sub:"db.py",               cat:"data",     x:430,  y:640 },
   { id:"gallery-dl",   label:"gallery-dl",      sub:"subprocess",          cat:"external", x:710,  y:640 },
   { id:"nas-storage",  label:"NAS Storage",     sub:"/nas/inkwell/",       cat:"external", x:990,  y:640 },
+  // Zipper
+  { id:"zipper",       label:"Zipper",          sub:"zipper.py",           cat:"core",     x:1100, y:510 },
 ];
 
 const FLOWS = [
@@ -199,6 +201,7 @@ const FLOWS = [
       { from:"gallery-dl", to:"nas-storage", label:"writes media files", detail:"gallery-dl downloads and saves files to /nas/inkwell/{handle}/{year}/" },
       { from:"downloader", to:"nas-storage", label:"_diff_snapshots()", detail:"Compares before/after snapshots to count new files and bytes" },
       { from:"downloader", to:"database", label:"update_job_completion()", detail:"Records final status, file count, total bytes, and any error message" },
+      { from:"downloader", to:"zipper", label:"zip_artist_dirs() [if enabled]", detail:"Compresses year directories into ZIP archives after successful download" },
     ]
   },
   {
@@ -297,6 +300,28 @@ const FLOWS = [
       { from:"app", to:"site-registry", label:"registry.all_adapters()", detail:"Iterates over all registered site adapters" },
       { from:"site-registry", to:"cookie-mgr", label:"is_file_expired(auth_file, warning_days)", detail:"Checks if credential files are older than expiry_warning_days (default 30)" },
       { from:"app", to:"database", label:"get_state('auth_valid:{site}')", detail:"Checks if auth was marked invalid by a previous download error" },
+    ]
+  },
+  {
+    id: "auto-zip-post-job",
+    name: "Auto-Zip (Post-Job)",
+    desc: "After a successful download, year directories are compressed into ZIP archives to reduce NAS small-file load.",
+    steps: [
+      { from:"downloader", to:"config-loader", label:"config.zip.enabled · on_job_complete", detail:"Checks if auto-zip is enabled for post-job execution" },
+      { from:"downloader", to:"zipper", label:"zip_artist_dirs(nas_path, handle)", detail:"Scans artist dir for year subdirectories (YYYY pattern)" },
+      { from:"zipper", to:"nas-storage", label:"zip_year_dir() per year", detail:"Creates {year}.zip, verifies integrity, then deletes loose files" },
+      { from:"zipper", to:"database", label:"insert_log() [if zipped]", detail:"Logs number of year archives created for the artist" },
+    ]
+  },
+  {
+    id: "auto-zip-retroactive",
+    name: "Auto-Zip (Retroactive)",
+    desc: "User triggers retroactive zipping of all artist directories from the Settings UI.",
+    steps: [
+      { from:"settings", to:"zipper", label:"zip_all_artists(config)", detail:"Launched in a background thread from the 'Zip All Artists Now' button" },
+      { from:"zipper", to:"nas-storage", label:"scan artist dirs", detail:"Iterates all directories under /nas/inkwell/" },
+      { from:"zipper", to:"nas-storage", label:"zip_year_dir() per year", detail:"Skips years already zipped (zip mtime ≥ dir mtime), creates new archives" },
+      { from:"zipper", to:"database", label:"insert_log(summary)", detail:"Logs total archives created across all artists" },
     ]
   },
 ];

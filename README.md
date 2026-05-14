@@ -13,6 +13,7 @@ Self-hosted media archiver for artists on X.com, Pixiv, and DeviantArt. Download
 - Download metrics (file count, bytes) per job
 - Cookie and token management with expiry warnings
 - Auth error detection with dashboard alerts
+- Auto-zip media per artist per year to reduce NAS small-file load
 - Runs as a single Docker container with a pre-built image (no build tools needed)
 
 ## Requirements
@@ -87,6 +88,11 @@ password_hash = ""                   # Set automatically from INKWELL_PASSWORD
 
 [retention]
 log_days = 90                        # Prune logs older than this on startup
+
+[zip]
+enabled = true                       # Enable auto-zip functionality
+on_job_complete = true               # Zip after each successful download
+compression_level = 6                # ZIP_DEFLATED level (0-9)
 ```
 
 ### `gallery-dl.conf`
@@ -103,17 +109,25 @@ nas-host:/export/inkwell  /nas/inkwell  nfs  soft,intr  0 0
 
 ## Storage Layout
 
-Downloaded media is organized on the NAS:
+Downloaded media is organized on the NAS. When auto-zip is enabled, year directories are compressed into ZIP archives after download:
 
 ```
 /nas/inkwell/
 ├── artist_name/
+│   ├── 2024.zip          # Compressed archive of 2024 media
 │   └── 2025/
 │       ├── 001_image.jpg
 │       └── 002_artwork.png
 └── another_artist/
-    └── 2025/
+    ├── 2023.zip
+    └── 2024.zip
 ```
+
+Zipping does **not** affect gallery-dl's deduplication — it tracks download URLs in a SQLite archive DB, not filesystem paths. Already-downloaded media will never be re-downloaded regardless of whether files are zipped.
+
+### Retroactive Zipping
+
+Existing media can be zipped retroactively via **Settings → Storage → Zip All Artists Now**. This scans all artist directories and creates archives for any year directories that haven't been zipped yet.
 
 ## Usage
 
@@ -124,6 +138,7 @@ Downloaded media is organized on the NAS:
 | Remove artist | Click "Remove" (keeps files) or "Delete Files" (removes files) |
 | View logs | Expand the Logs section, filter by level/source |
 | Update cookies | Settings section, upload new `cookies.txt` |
+| Zip existing media | Settings → Storage → "Zip All Artists Now" |
 
 ## Updating
 

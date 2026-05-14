@@ -117,7 +117,8 @@ const components=[
   {id:"gallery_dl",label:"gallery-dl",file:"subprocess",x:876,y:434,color:"#818cf8",layer:"infra"},
   {id:"nas",label:"NAS Storage",file:"NFS bind mount",x:206,y:527,color:"#78716c",layer:"external"},
   {id:"models",label:"Models",file:"models.py · Artist, Job",x:476,y:527,color:"#78716c",layer:"external"},
-  {id:"bootstrap",label:"Bootstrap",file:"bootstrap.py",x:746,y:527,color:"#78716c",layer:"external"}
+  {id:"bootstrap",label:"Bootstrap",file:"bootstrap.py",x:746,y:527,color:"#78716c",layer:"external"},
+  {id:"zipper",label:"Zipper",file:"zipper.py",x:980,y:527,color:"#34d399",layer:"support"}
 ];
 
 const flows=[
@@ -180,6 +181,8 @@ const flows=[
       {from:"gallery_dl",to:"nas",label:"write media files",detail:"Downloads to /nas/inkwell/{handle}/{year}/ via NFS bind mount"},
       {from:"downloader",to:"nas",label:"snapshot after + diff",detail:"Walks directory again, diffs to count new files and total bytes"},
       {from:"downloader",to:"db",label:"update_job(completion)",detail:"Records file_count, total_bytes, status='success'"},
+      {from:"downloader",to:"zipper",label:"zip_artist_dirs() [if enabled]",detail:"Compresses year directories into ZIP archives after successful download"},
+      {from:"zipper",to:"nas",label:"create {year}.zip + delete loose files",detail:"Creates per-year ZIP with integrity check, then removes source files"},
       {from:"downloader",to:"rate_limiter",label:"record_success()",detail:"Decays cooldown multiplier on successful download"}
     ]
   },
@@ -286,6 +289,30 @@ const flows=[
       {from:"downloader",to:"downloader",label:"sleep backoff[attempt]",detail:"Waits 5s → 15s → 45s (configurable retry_backoff array)"},
       {from:"downloader",to:"gallery_dl",label:"retry subprocess",detail:"Re-runs gallery-dl for the same artist"},
       {from:"downloader",to:"db",label:"update_job(failed, all retries)",detail:"If all attempts fail: marks job failed with last error message"}
+    ]
+  },
+  {
+    id:"auto_zip_post",name:"Auto-Zip (Post-Job)",
+    desc:"Compresses year directories into ZIP archives after a successful download",
+    color:"#34d399",
+    steps:[
+      {from:"downloader",to:"config_loader",label:"check zip.enabled + on_job_complete",detail:"Verifies auto-zip is enabled in config.toml [zip] section"},
+      {from:"downloader",to:"zipper",label:"zip_artist_dirs(nas_path, handle)",detail:"Scans artist directory for YYYY-pattern subdirectories"},
+      {from:"zipper",to:"nas",label:"scan year dirs",detail:"Finds eligible year directories (skips already-zipped with newer mtime)"},
+      {from:"zipper",to:"nas",label:"zip_year_dir() per year",detail:"Creates {year}.zip with ZIP_DEFLATED, verifies integrity, deletes loose files"},
+      {from:"zipper",to:"db",label:"insert_log(zipped N years)",detail:"Logs number of year archives created for the artist"}
+    ]
+  },
+  {
+    id:"auto_zip_retro",name:"Auto-Zip (Retroactive)",
+    desc:"Manually trigger zipping of all existing artist directories from Settings",
+    color:"#fbbf24",
+    steps:[
+      {from:"user",to:"settings",label:"click Zip All Artists Now",detail:"User clicks the retroactive zip button in Settings → Storage"},
+      {from:"settings",to:"zipper",label:"zip_all_artists(config)",detail:"Launched in a background daemon thread"},
+      {from:"zipper",to:"nas",label:"scan all artist dirs",detail:"Iterates every directory under /nas/inkwell/"},
+      {from:"zipper",to:"nas",label:"zip_artist_dirs() per artist",detail:"For each artist: find year dirs, skip if zip already current, create archives"},
+      {from:"zipper",to:"db",label:"insert_log(summary)",detail:"Logs total archives created across all artists (or 'nothing to zip')"}
     ]
   }
 ];
