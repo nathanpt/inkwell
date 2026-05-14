@@ -14,9 +14,10 @@ RUN uv pip install --system --no-cache-dir .
 COPY src/ src/
 COPY .streamlit/ .streamlit/
 
-# Copy default configs (used when bind mounts are missing)
-COPY config.toml /app/defaults/config.toml
-COPY gallery-dl.*.conf /app/defaults/
+# Copy default configs to /app/config (bind mounts overlay these)
+RUN mkdir -p /app/config
+COPY config.toml /app/config/config.toml
+COPY gallery-dl.*.conf /app/config/
 
 VOLUME /app/data
 EXPOSE 8501
