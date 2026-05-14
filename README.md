@@ -73,6 +73,9 @@ mount_path = "/nas/inkwell"          # NFS share path (bind-mounted)
 
 [schedule]
 cron = "0 3 * * *"                   # Nightly at 03:00
+time_window_start = ""               # Only run within this time window (HH:MM, empty = any)
+time_window_end = ""                 # End of time window (HH:MM, empty = any)
+stale_threshold_days = 0             # Only download artists not scanned in N days (0 = all)
 
 [download]
 retry_attempts = 3                   # Per-artist retries on failure
@@ -89,10 +92,25 @@ password_hash = ""                   # Set automatically from INKWELL_PASSWORD
 [retention]
 log_days = 90                        # Prune logs older than this on startup
 
+[rate_limit]
+multiplier_step = 1.5                # Cooldown multiplier increase per rate-limit hit
+max_multiplier = 8.0                 # Maximum cooldown multiplier
+pause_threshold = 6.0                # Multiplier at which the site is paused
+decay_rate = 0.5                     # Multiplier decay on successful download
+
 [zip]
 enabled = true                       # Enable auto-zip functionality
 on_job_complete = true               # Zip after each successful download
 compression_level = 6                # ZIP_DEFLATED level (0-9)
+
+[sites.xcom]
+cooldown = [30, 60]                  # Inter-artist cooldown for X.com
+
+[sites.pixiv]
+cooldown = [5, 15]                   # Inter-artist cooldown for Pixiv
+
+[sites.deviantart]
+cooldown = [5, 15]                   # Inter-artist cooldown for DeviantArt
 ```
 
 ### `gallery-dl.conf`

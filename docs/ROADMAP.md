@@ -10,6 +10,7 @@
 - [ ] MkDocs + Material theme documentation site, deployed to GitHub Pages
 - [ ] Image gallery integration (Piwigo, Komga)
 - [ ] Discord/Telegram notifications on new archival
+- [ ] Toggle zip on/off from the Settings UI (currently config-file only)
 - [x] Download scheduling with time windows and stale-only filtering
 - [x] Post-download summary notification on Downloads tab
 - [ ] Automated SQLite dumps and NAS snapshot scheduling
