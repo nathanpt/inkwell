@@ -179,6 +179,70 @@ def download_all(
     return jobs
 
 
+def download_stale(
+    config: Config,
+    registry: SiteRegistry,
+    stale_threshold_days: int,
+    triggered_by: str = "scheduled",
+) -> list[Job]:
+    """Download only artists whose last_scan_at is older than the threshold or has never been scanned."""
+    from datetime import datetime, timedelta, timezone
+
+    artists = db.get_active_artists()
+    if not artists:
+        logger.info("No active artists to download")
+        return []
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=stale_threshold_days)
+    stale = []
+    for a in artists:
+        if a.last_scan_at is None:
+            stale.append(a)
+            continue
+        try:
+            scanned = datetime.fromisoformat(a.last_scan_at)
+            if scanned.tzinfo is None:
+                scanned = scanned.replace(tzinfo=timezone.utc)
+            if scanned < cutoff:
+                stale.append(a)
+        except (ValueError, TypeError):
+            stale.append(a)
+
+    if not stale:
+        logger.info("No stale artists to download")
+        return []
+
+    logger.info("Found %d stale artist(s) out of %d total", len(stale), len(artists))
+
+    # NAS pre-flight check
+    if not check_nas_with_retry(Path(config.nas.mount_path)):
+        db.insert_log("ERROR", "downloader", "NAS unavailable, aborting stale download run")
+        return []
+
+    jobs: list[Job] = []
+    for i, artist in enumerate(stale):
+        if is_site_paused(artist.site, config.rate_limit):
+            logger.warning("Skipping %s — site %s is rate-limit paused", artist.handle, artist.site)
+            db.insert_log("WARNING", "downloader", f"Skipping {artist.handle}: site {artist.site} is rate-limit paused")
+            continue
+
+        logger.info("Downloading stale %s (%d/%d)", artist.handle, i + 1, len(stale))
+        job = download_artist(artist, config, registry, triggered_by)
+        jobs.append(job)
+
+        if i < len(stale) - 1:
+            base_cooldown = random.randint(
+                config.download.inter_artist_cooldown[0],
+                config.download.inter_artist_cooldown[1],
+            )
+            multiplier = get_cooldown_multiplier(artist.site)
+            cooldown = int(base_cooldown * multiplier)
+            logger.debug("Inter-artist cooldown: %ds (multiplier=%.1f)", cooldown, multiplier)
+            time.sleep(cooldown)
+
+    return jobs
+
+
 def _run_gallery_dl(
     source_url: str,
     config: Config,

@@ -21,6 +21,8 @@ def render_settings():
     st.code(f"""
 NAS path: {config.nas.display_path or config.nas.mount_path}
 Schedule: {config.schedule.cron}
+Time window: {config.schedule.time_window_start or 'any'} - {config.schedule.time_window_end or 'any'}
+Stale threshold: {config.schedule.stale_threshold_days or 'all artists'}{' days' if config.schedule.stale_threshold_days else ''}
 Retry attempts: {config.download.retry_attempts}
 Timeout: {config.download.timeout}s
 Cookie expiry warning: {config.cookies.expiry_warning_days} days

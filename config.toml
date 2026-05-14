@@ -3,6 +3,9 @@ mount_path = "/nas/inkwell"
 
 [schedule]
 cron = "0 3 * * *"
+time_window_start = ""
+time_window_end = ""
+stale_threshold_days = 0
 
 [download]
 retry_attempts = 3

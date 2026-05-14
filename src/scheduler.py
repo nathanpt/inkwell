@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from src.config_loader import Config
-from src.downloader import download_all
+from src.downloader import download_all, download_stale
 from src.sites.base import SiteRegistry, create_registry
 
 logger = logging.getLogger(__name__)
@@ -47,14 +48,51 @@ def create_scheduler(config: Config) -> BackgroundScheduler:
     return scheduler
 
 
+def _is_in_time_window(config: Config) -> bool:
+    """Check if the current time is within the configured time window."""
+    start = config.schedule.time_window_start.strip()
+    end = config.schedule.time_window_end.strip()
+    if not start or not end:
+        return True
+
+    try:
+        now = datetime.now()
+        start_h, start_m = map(int, start.split(":"))
+        end_h, end_m = map(int, end.split(":"))
+        start_min = start_h * 60 + start_m
+        end_min = end_h * 60 + end_m
+        now_min = now.hour * 60 + now.minute
+        if start_min <= end_min:
+            return start_min <= now_min < end_min
+        else:
+            # Window wraps midnight, e.g. 22:00-06:00
+            return now_min >= start_min or now_min < end_min
+    except (ValueError, AttributeError):
+        logger.warning("Invalid time window format: %s-%s", start, end)
+        return True
+
+
 def _scheduled_run(config: Config, registry: SiteRegistry) -> None:
     """Callback for the scheduled download job."""
     from src import db
 
     logger.info("Scheduled download run starting")
-    db.insert_log("INFO", "scheduler", "Scheduled download run starting")
+
+    if not _is_in_time_window(config):
+        logger.info("Outside time window (%s-%s), skipping", config.schedule.time_window_start, config.schedule.time_window_end)
+        db.insert_log("INFO", "scheduler", f"Outside time window ({config.schedule.time_window_start}-{config.schedule.time_window_end}), skipping")
+        return
+
     try:
-        jobs = download_all(config, registry, triggered_by="scheduled")
+        threshold = config.schedule.stale_threshold_days
+        if threshold > 0:
+            logger.info("Running stale-only download (threshold=%d days)", threshold)
+            db.insert_log("INFO", "scheduler", f"Stale-only download run starting (threshold={threshold} days)")
+            jobs = download_stale(config, registry, threshold, triggered_by="scheduled")
+        else:
+            db.insert_log("INFO", "scheduler", "Scheduled download run starting")
+            jobs = download_all(config, registry, triggered_by="scheduled")
+
         succeeded = sum(1 for j in jobs if j.status == "failed")
         db.insert_log(
             "INFO",

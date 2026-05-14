@@ -16,6 +16,9 @@ class NASConfig:
 @dataclass
 class ScheduleConfig:
     cron: str = "0 3 * * *"
+    time_window_start: str = ""  # HH:MM, empty = no restriction
+    time_window_end: str = ""    # HH:MM, empty = no restriction
+    stale_threshold_days: int = 0  # 0 = download all artists
 
 
 @dataclass
