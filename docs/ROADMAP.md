@@ -14,6 +14,7 @@
 
 ## Completed
 
+- [x] Fix gallery-dl archive path to prevent re-downloads after zipping
 - [x] Replace expander-based UI with tabs for better navigation
 - [x] Add artist search/filter bar and reduce page size to 10
 - [x] Accept localized Pixiv URLs (e.g. /en/users/12345)

@@ -191,7 +191,7 @@ def _run_gallery_dl(
         "gallery-dl",
         "--config", str(adapter.get_gallery_dl_config_path()),
         "--dest", config.nas.mount_path,
-        "--download-archive", f"sqlite:///{adapter.get_archive_db_path()}",
+        "--download-archive", str(adapter.get_archive_db_path()),
     ]
     for auth_file in adapter.get_auth_files():
         cmd.extend(["--cookies", str(auth_file)])
