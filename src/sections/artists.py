@@ -17,7 +17,7 @@ SITE_LABELS = {
     "deviantart": "DeviantArt",
 }
 
-PAGE_SIZE = 20
+PAGE_SIZE = 10
 
 
 def render_artists():
@@ -64,6 +64,16 @@ def render_artists():
     total_files = sum(disk_usage.get(a.handle, (0, 0))[0] for a in artists)
     total_bytes = sum(disk_usage.get(a.handle, (0, 0))[1] for a in artists)
     st.caption(f"Total: {total_files:,} files · {_format_bytes(total_bytes)} across {len(artists)} artist(s)")
+
+    # Search filter
+    search = st.text_input("Search artists", placeholder="Filter by name or site...", key="artist_search")
+    if search:
+        search_lower = search.lower()
+        artists = [a for a in artists if search_lower in a.handle.lower() or search_lower in SITE_LABELS.get(a.site, a.site).lower()]
+
+    if not artists:
+        st.info("No artists match your search.")
+        return
 
     # Pagination
     total_pages = max(1, -(-len(artists) // PAGE_SIZE))  # ceil division

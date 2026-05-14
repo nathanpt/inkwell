@@ -78,16 +78,20 @@ def _render_dashboard():
     from src.sections.logs import render_logs
     from src.sections.settings import render_settings
 
-    with st.expander("Artists", expanded=True):
+    tab_artists, tab_downloads, tab_settings, tab_logs = st.tabs(
+        ["Artists", "Downloads", "Settings", "Logs"]
+    )
+
+    with tab_artists:
         render_artists()
 
-    with st.expander("Downloads"):
+    with tab_downloads:
         render_downloads()
 
-    with st.expander("Settings"):
+    with tab_settings:
         render_settings()
 
-    with st.expander("Logs"):
+    with tab_logs:
         render_logs()
 
 

@@ -14,6 +14,8 @@
 
 ## Completed
 
+- [x] Replace expander-based UI with tabs for better navigation
+- [x] Add artist search/filter bar and reduce page size to 10
 - [x] Accept localized Pixiv URLs (e.g. /en/users/12345)
 - [x] Refactor Streamlit UI layout (horizontal button alignment, two-tier downloads, vertical_alignment)
 - [x] Fix cookies.txt upload rerun loop (file_uploader retained state across reruns)
