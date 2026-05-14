@@ -3,6 +3,7 @@
 ## Planned
 
 - [x] Show last download time per artist in the single-artist dropdown
+- [x] Add per-artist Download button in Artists tab; remove single-artist dropdown from Downloads tab
 - [x] Paginate or collapse artist list to prevent UI bloat at scale
 - [x] Interactive architecture flow diagram (docs/architecture.html)
 - [x] Interactive workflow diagram with JSON-driven flows (docs/workflows.html)

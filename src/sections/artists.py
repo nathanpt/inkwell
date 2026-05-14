@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import logging
 import os
 import shutil
+import threading
 from pathlib import Path
 
 import streamlit as st
 
 from src import db
+from src.downloader import download_artist
 from src.models import Artist
 from src.url_validator import validate_url, get_registry
+
+logger = logging.getLogger(__name__)
 
 
 SITE_LABELS = {
@@ -18,6 +23,25 @@ SITE_LABELS = {
 }
 
 PAGE_SIZE = 10
+
+
+def _run_download(artist):
+    """Run download for a single artist in a background thread."""
+    config = st.session_state.config
+    registry = get_registry()
+
+    def wrapper():
+        try:
+            download_artist(artist, config, registry, "manual")
+        except Exception as e:
+            logger.exception("Background download thread crashed: %s", e)
+            try:
+                db.insert_log("ERROR", "downloader", f"Thread crashed: {e}")
+            except Exception:
+                pass
+
+    t = threading.Thread(target=wrapper, daemon=True)
+    t.start()
 
 
 def render_artists():
@@ -101,12 +125,16 @@ def render_artists():
         display = adapter.get_display_handle(artist)
         site_label = SITE_LABELS.get(artist.site, artist.site)
 
-        col_info, col_rm, col_del = st.columns([0.6, 0.2, 0.2], vertical_alignment="center")
+        col_info, col_dl, col_rm, col_del = st.columns([0.50, 0.17, 0.17, 0.17], vertical_alignment="center")
         with col_info:
             last_scan = artist.last_scan_at or "Never"
             count, size = disk_usage.get(artist.handle, (0, 0))
             meta = f"{count:,} file(s) · {_format_bytes(size)}" if count > 0 else "No files"
             st.markdown(f"**{display}** ({site_label}) — last scan: {last_scan}  \n{meta}")
+        with col_dl:
+            if st.button("Download", key=f"dl_{artist.id}", use_container_width=True):
+                _run_download(artist)
+                st.info(f"Download started for {display}")
         with col_rm:
             if st.button("Remove", key=f"rm_{artist.id}", use_container_width=True):
                 db.deactivate_artist(artist.id)

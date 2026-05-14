@@ -7,7 +7,7 @@ import pandas as pd
 import streamlit as st
 
 from src import db
-from src.downloader import download_all, download_artist
+from src.downloader import download_all
 from src.url_validator import get_registry
 
 logger = logging.getLogger(__name__)
@@ -34,28 +34,19 @@ def render_downloads():
     config = st.session_state.config
     registry = get_registry()
 
-    # Tier 1: Global action
+    # Stale artist summary
+    artists = db.get_active_artists()
+    never_scanned = [a for a in artists if not a.last_scan_at]
+    if never_scanned:
+        names = ", ".join(
+            registry.get(a.site).get_display_handle(a) for a in never_scanned
+        )
+        st.warning(f"**Never downloaded:** {names}", icon="⬇️")
+
+    # Global action
     if st.button("Download All Now", type="primary", use_container_width=True):
         _run_in_thread(download_all, extra_args=(config, registry, "manual"))
         st.info("Download started in background. Refresh to see progress.")
-
-    # Tier 2: Single-artist download
-    st.divider()
-    artists = db.get_active_artists()
-    if artists:
-        col_select, col_action = st.columns([3, 1], vertical_alignment="bottom")
-        with col_select:
-            selected = st.selectbox(
-                "Single artist",
-                options=[(a.id, _artist_label(a, registry)) for a in artists],
-                format_func=lambda x: x[1],
-                key="single_artist_select",
-            )
-        with col_action:
-            if st.button("Download Selected", use_container_width=True):
-                artist = next(a for a in artists if a.id == selected[0])
-                _run_in_thread(download_artist, extra_args=(artist, config, registry, "manual"))
-                st.info(f"Download started for {registry.get(artist.site).get_display_handle(artist)}")
 
     # Job history
     st.divider()
@@ -106,17 +97,6 @@ def render_downloads():
     for r in failed:
         artist = _display_handle(r["artist_handle"], r["artist_site"], registry)
         st.caption(f"Error ({artist}): {r['error_message']}")
-
-
-def _artist_label(artist, registry) -> str:
-    from src.models import Artist
-    try:
-        adapter = registry.get(artist.site)
-        display = adapter.get_display_handle(artist)
-    except ValueError:
-        display = artist.handle
-    last = artist.last_scan_at or "never"
-    return f"{display}  (last: {last})"
 
 
 def _display_handle(handle: str, site: str, registry) -> str:
