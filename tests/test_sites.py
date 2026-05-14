@@ -85,6 +85,8 @@ class TestPixivAdapter:
         assert self.adapter.match_url("https://www.pixiv.net/users/12345")
         assert self.adapter.match_url("https://www.pixiv.net/en/users/12345")
         assert self.adapter.match_url("https://www.pixiv.net/ja/users/12345")
+        assert self.adapter.match_url("https://www.pixiv.net/en/users/12345/illustrations")
+        assert self.adapter.match_url("https://www.pixiv.net/users/12345/artworks")
 
     def test_match_invalid(self):
         assert not self.adapter.match_url("https://x.com/artist")
@@ -94,6 +96,11 @@ class TestPixivAdapter:
         handle, url = self.adapter.parse_url("https://www.pixiv.net/users/12345")
         assert handle == "12345"
         assert url == "https://www.pixiv.net/users/12345"
+
+    def test_parse_illustrations_normalizes(self):
+        handle, url = self.adapter.parse_url("https://www.pixiv.net/en/users/599004/illustrations")
+        assert handle == "599004"
+        assert url == "https://www.pixiv.net/users/599004"
 
     def test_parse_rejects_invalid(self):
         with pytest.raises(ValueError):

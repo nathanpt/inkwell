@@ -14,6 +14,7 @@
 
 ## Completed
 
+- [x] Accept Pixiv URLs with sub-section paths (/illustrations, /artworks, etc.)
 - [x] Fix gallery-dl archive path to prevent re-downloads after zipping
 - [x] Replace expander-based UI with tabs for better navigation
 - [x] Add artist search/filter bar and reduce page size to 10

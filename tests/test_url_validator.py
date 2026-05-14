@@ -56,6 +56,12 @@ class TestValidateUrl:
         assert url == "https://www.pixiv.net/users/12345"
         assert adapter.name == "pixiv"
 
+    def test_valid_pixiv_illustrations(self):
+        handle, url, adapter = validate_url("https://www.pixiv.net/en/users/599004/illustrations")
+        assert handle == "599004"
+        assert url == "https://www.pixiv.net/users/599004"
+        assert adapter.name == "pixiv"
+
     def test_valid_deviantart(self):
         handle, url, adapter = validate_url("https://www.deviantart.com/username")
         assert handle == "username"
