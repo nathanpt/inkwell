@@ -34,6 +34,11 @@ def render_downloads():
     config = st.session_state.config
     registry = get_registry()
 
+    # Last run summary
+    summary = db.get_last_run_summary()
+    if summary:
+        _render_run_summary(summary, registry)
+
     # Stale artist summary
     artists = db.get_active_artists()
     never_scanned = [a for a in artists if not a.last_scan_at]
@@ -97,6 +102,28 @@ def render_downloads():
     for r in failed:
         artist = _display_handle(r["artist_handle"], r["artist_site"], registry)
         st.caption(f"Error ({artist}): {r['error_message']}")
+
+
+def _render_run_summary(summary: dict, registry) -> None:
+    """Render a card summarizing the last completed download run."""
+    trigger_label = "Scheduled" if summary["triggered_by"] == "scheduled" else "Manual"
+    files_str = f"{summary['total_files']:,} new files" if summary["total_files"] else "no new files"
+    size_str = _format_bytes(summary["total_bytes"]) if summary["total_bytes"] else ""
+
+    parts = [files_str]
+    if size_str:
+        parts.append(size_str)
+    detail = " | ".join(parts)
+
+    header = f"**Last run** ({trigger_label}) — {summary['started_at'][:19]} to {summary['finished_at'][:19]}"
+    stats = f"{summary['total_artists']} artists: {summary['succeeded']} succeeded, {summary['failed']} failed | {detail}"
+
+    if summary["failed"] > 0:
+        st.warning(f"{header}\n\n{stats}", icon=":material/warning:")
+        for handle, error in summary["errors"]:
+            st.caption(f"- {handle}: {error}")
+    else:
+        st.success(f"{header}\n\n{stats}", icon=":material/check_circle:")
 
 
 def _display_handle(handle: str, site: str, registry) -> str:

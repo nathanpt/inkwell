@@ -11,6 +11,7 @@
 - [ ] Image gallery integration (Piwigo, Komga)
 - [ ] Discord/Telegram notifications on new archival
 - [x] Download scheduling with time windows and stale-only filtering
+- [x] Post-download summary notification on Downloads tab
 - [ ] Automated SQLite dumps and NAS snapshot scheduling
 - [x] Add functionality to auto-zip downloaded media per artist per year to reduce small-file load on NAS hard drives. This should be able to be performed at the end of a job and retroactively. functionality to disallow re-downloading already downloaded files must be maintained.
 

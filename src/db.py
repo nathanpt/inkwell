@@ -260,6 +260,81 @@ def update_job_progress(job_id: int, file_count: int, total_bytes: int) -> None:
         conn.commit()
 
 
+def get_last_run_summary() -> dict | None:
+    """Derive the last completed run summary from recent jobs.
+
+    Groups jobs by triggered_by and started_at proximity (within 2 hours
+    of the first job in the batch). Returns None if no completed run exists.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT j.*, a.handle AS artist_handle, a.site AS artist_site "
+            "FROM jobs j JOIN artists a ON j.artist_id = a.id "
+            "ORDER BY j.started_at DESC LIMIT 100"
+        ).fetchall()
+
+    if not rows:
+        return None
+
+    first = dict(rows[0])
+    triggered_by = first["triggered_by"]
+
+    # Parse the first job's started_at to establish the batch window
+    try:
+        batch_start = datetime.fromisoformat(first["started_at"])
+        if batch_start.tzinfo is None:
+            batch_start = batch_start.replace(tzinfo=timezone.utc)
+    except (ValueError, TypeError):
+        return None
+
+    cutoff = batch_start + timedelta(hours=2)
+
+    batch = []
+    for r in rows:
+        row = dict(r)
+        if row["triggered_by"] != triggered_by:
+            break
+        try:
+            started = datetime.fromisoformat(row["started_at"])
+            if started.tzinfo is None:
+                started = started.replace(tzinfo=timezone.utc)
+            if started > cutoff:
+                break
+        except (ValueError, TypeError):
+            break
+        batch.append(row)
+
+    # Only return if at least one job is completed (not all running)
+    completed = [r for r in batch if r["status"] != "running"]
+    if not completed:
+        return None
+
+    succeeded = [r for r in completed if r["status"] == "success"]
+    failed = [r for r in completed if r["status"] == "failed"]
+    total_files = sum(r["file_count"] for r in completed)
+    total_bytes = sum(r["total_bytes"] for r in completed)
+    finished_at = max(r["finished_at"] for r in completed if r["finished_at"])
+    errors = [
+        (r["artist_handle"], r["error_message"])
+        for r in failed
+        if r["error_message"]
+    ]
+
+    return {
+        "triggered_by": triggered_by,
+        "started_at": first["started_at"],
+        "finished_at": finished_at,
+        "total_artists": len(completed),
+        "succeeded": len(succeeded),
+        "failed": len(failed),
+        "total_files": total_files,
+        "total_bytes": total_bytes,
+        "errors": errors,
+    }
+
+
 # --- Logs ---
 
 
