@@ -10,7 +10,7 @@
 - [ ] Image gallery integration (Piwigo, Komga)
 - [ ] Discord/Telegram notifications on new archival
 - [ ] Automated SQLite dumps and NAS snapshot scheduling
-- [ ] Auto-zip downloaded media per artist per year to reduce small-file load on NAS hard drives
+- [x] Add functionality to auto-zip downloaded media per artist per year to reduce small-file load on NAS hard drives. This should be able to be performed at the end of a job and retroactively. functionality to disallow re-downloading already downloaded files must be maintained.
 
 ## Completed
 

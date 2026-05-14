@@ -13,6 +13,7 @@ from src.models import Artist, Job
 from src.nas_monitor import check_nas_with_retry
 from src.rate_limiter import record_hit, record_success, is_site_paused, get_cooldown_multiplier
 from src.sites.base import SiteAdapter, SiteRegistry
+from src import zipper
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,18 @@ def download_artist(
                 db.update_last_scan(artist.id)
                 record_success(artist.site, config.rate_limit)
                 db.insert_log("INFO", "downloader", f"Downloaded {file_count} file(s) for {artist.handle}", job_id=job.id, artist_id=artist.id)
+
+                if config.zip.enabled and config.zip.on_job_complete:
+                    try:
+                        zipped = zipper.zip_artist_dirs(
+                            Path(config.nas.mount_path), artist.handle, config.zip.compression_level
+                        )
+                        if zipped:
+                            db.insert_log("INFO", "downloader", f"Zipped {len(zipped)} year(s) for {artist.handle}", job_id=job.id, artist_id=artist.id)
+                    except Exception:
+                        logger.exception("Post-job zip failed for %s", artist.handle)
+                        db.insert_log("WARNING", "downloader", f"Post-job zip failed for {artist.handle}", job_id=job.id, artist_id=artist.id)
+
                 job.status = "success"
                 job.file_count = file_count
                 job.total_bytes = total_bytes

@@ -55,6 +55,13 @@ class SiteConfig:
 
 
 @dataclass
+class ZipConfig:
+    enabled: bool = True
+    on_job_complete: bool = True
+    compression_level: int = 6
+
+
+@dataclass
 class Config:
     nas: NASConfig = field(default_factory=NASConfig)
     schedule: ScheduleConfig = field(default_factory=ScheduleConfig)
@@ -63,6 +70,7 @@ class Config:
     auth: AuthConfig = field(default_factory=AuthConfig)
     retention: RetentionConfig = field(default_factory=RetentionConfig)
     rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
+    zip: ZipConfig = field(default_factory=ZipConfig)
     sites: dict[str, SiteConfig] = field(default_factory=dict)
 
 
@@ -80,5 +88,6 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
         auth=AuthConfig(**raw.get("auth", {})),
         retention=RetentionConfig(**raw.get("retention", {})),
         rate_limit=RateLimitConfig(**raw.get("rate_limit", {})),
+        zip=ZipConfig(**raw.get("zip", {})),
         sites=sites,
     )

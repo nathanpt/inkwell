@@ -25,6 +25,11 @@ max_multiplier = 8.0
 pause_threshold = 6.0
 decay_rate = 0.5
 
+[zip]
+enabled = true
+on_job_complete = true
+compression_level = 6
+
 [sites.xcom]
 cooldown = [30, 60]
 

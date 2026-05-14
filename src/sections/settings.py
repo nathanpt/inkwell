@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import threading
+
 import streamlit as st
 
 from src import db
@@ -32,6 +34,33 @@ Log retention: {config.retention.log_days} days
     _render_xcom_auth()
     _render_pixiv_auth()
     _render_deviantart_auth()
+
+    # Storage management
+    st.divider()
+    st.subheader("Storage")
+
+    col_zip, col_info = st.columns([1, 2])
+    with col_zip:
+        if st.button("Zip All Artists Now", use_container_width=True):
+            from src import zipper
+
+            config = st.session_state.config
+
+            def _run():
+                try:
+                    results = zipper.zip_all_artists(config)
+                    total = sum(len(v) for v in results.values())
+                    if total:
+                        db.insert_log("INFO", "settings", f"Retroactive zip completed: {total} archive(s) across {len(results)} artist(s)")
+                    else:
+                        db.insert_log("INFO", "settings", "Retroactive zip: nothing to zip")
+                except Exception as e:
+                    db.insert_log("ERROR", "settings", f"Retroactive zip failed: {e}")
+
+            threading.Thread(target=_run, daemon=True).start()
+            st.info("Zip started in background. Check Logs for results.")
+    with col_info:
+        st.caption("Compresses loose files into per-year ZIP archives for each artist, reducing NAS small-file load.")
 
 
 def _render_xcom_auth():
