@@ -7,10 +7,7 @@ services:
             - "8501:8501"
         volumes:
             - inkwell-data:/app/data # SQLite DB (persisted in named Docker volume)
-            - ./config.toml:/app/config/config.toml:ro # App config (bind-mounted read-only)
-            - ./gallery-dl.xcom.conf:/app/config/gallery-dl.xcom.conf:ro # gallery-dl X.com config
-            - ./gallery-dl.pixiv.conf:/app/config/gallery-dl.pixiv.conf:ro # gallery-dl Pixiv config
-            - ./gallery-dl.deviantart.conf:/app/config/gallery-dl.deviantart.conf:ro # gallery-dl DeviantArt config
+            - ./config:/app/config:ro # Config directory (bind-mounted read-only)
             - /path/to/media:/nas/inkwell:rw # NAS media storage (change to match your mount)
         environment:
             - INKWELL_PASSWORD=${INKWELL_PASSWORD}
