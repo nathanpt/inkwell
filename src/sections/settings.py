@@ -115,12 +115,16 @@ def _render_cookie_section(adapter, path, label):
         st.warning(f"No {label} uploaded yet.")
 
     key = f"upload_{adapter.name}"
-    uploaded = st.file_uploader(
+
+    def _on_upload():
+        uploaded = st.session_state[key]
+        if uploaded is not None:
+            save_file(path, uploaded.read(), adapter)
+            st.session_state[key] = None
+
+    st.file_uploader(
         f"Upload {label}",
         type=["txt"],
         key=key,
+        on_change=_on_upload,
     )
-    if uploaded is not None:
-        save_file(path, uploaded.read(), adapter)
-        st.session_state[key] = None
-        st.rerun()
