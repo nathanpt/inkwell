@@ -63,6 +63,7 @@ def download_artist(
                 db.update_job_completion(
                     job.id, "success", file_count, total_bytes
                 )
+                db.insert_file_records(job.id, artist.id, _new_file_records(before_snapshot, after_snapshot))
                 db.update_last_scan(artist.id)
                 record_success(artist.site, config.rate_limit)
                 db.insert_log("INFO", "downloader", f"Downloaded {file_count} file(s) for {artist.handle}", job_id=job.id, artist_id=artist.id)
@@ -89,6 +90,7 @@ def download_artist(
             # Check rate-limit first
             if adapter.detect_rate_limit_error(stderr):
                 record_hit(artist.site, config.rate_limit)
+                db.insert_file_records(job.id, artist.id, _new_file_records(before_snapshot, after_snapshot))
                 db.update_job_completion(job.id, "failed", file_count, total_bytes, error_message="Rate limited by site")
                 db.insert_log("WARNING", "downloader", f"Rate limited for {artist.handle}, skipping retries", job_id=job.id, artist_id=artist.id)
                 job.status = "failed"
@@ -99,6 +101,7 @@ def download_artist(
 
             if adapter.detect_auth_error(stderr):
                 adapter.mark_auth_invalid()
+                db.insert_file_records(job.id, artist.id, _new_file_records(before_snapshot, after_snapshot))
                 db.update_job_completion(job.id, "failed", file_count, total_bytes, error_message="Auth error: credentials may be expired")
                 db.insert_log("ERROR", "downloader", f"Auth error for {artist.handle}: credentials invalid", job_id=job.id, artist_id=artist.id)
                 job.status = "failed"
@@ -130,6 +133,7 @@ def download_artist(
     # Final snapshot to capture any partial downloads
     after_snapshot = _snapshot_directory(artist_dir)
     file_count, total_bytes = _diff_snapshots(before_snapshot, after_snapshot)
+    db.insert_file_records(job.id, artist.id, _new_file_records(before_snapshot, after_snapshot))
     db.update_job_completion(job.id, "failed", file_count, total_bytes, error_message=last_error)
     db.insert_log("ERROR", "downloader", f"All retries exhausted for {artist.handle}: {last_error}", job_id=job.id, artist_id=artist.id)
     job.status = "failed"
@@ -346,3 +350,14 @@ def _diff_snapshots(
     new_files = set(after.keys()) - set(before.keys())
     total_bytes = sum(after[f] for f in new_files)
     return len(new_files), total_bytes
+
+
+def _new_file_records(before: dict[str, int], after: dict[str, int]) -> list[tuple[str, str, int]]:
+    """Return [(filename, year, size_bytes)] for files in after but not before."""
+    new_files = set(after.keys()) - set(before.keys())
+    records = []
+    for rel_path in sorted(new_files):
+        parts = Path(rel_path).parts
+        year = parts[0] if parts and parts[0].isdigit() else "unknown"
+        records.append((rel_path, year, after[rel_path]))
+    return records

@@ -56,7 +56,11 @@ def bootstrap(config_path: Path | None = None) -> tuple[sqlite3.Connection, Conf
     if pruned:
         logger.info("Pruned %d old log entries", pruned)
 
-    # 6. Verify config files exist
+    # 6. One-time backfill of files table from NAS
+    if not _bootstrap_done:
+        _backfill_files(config)
+
+    # 7. Verify config files exist
     _verify_config_files()
 
     logger.info("Bootstrap complete")
@@ -95,3 +99,51 @@ def _verify_config_files() -> None:
         raise FileNotFoundError(
             f"No gallery-dl site configs found in {CONFIG_DIR} or {DEFAULTS_DIR}."
         )
+
+
+def _backfill_files(config: Config) -> None:
+    """One-time scan of NAS to populate the files table for existing media.
+
+    Guarded by a state flag so it only runs once after upgrade.
+    """
+    if db.get_state("files_backfilled") == "1":
+        return
+
+    nas_path = Path(config.nas.mount_path)
+    if not nas_path.is_dir():
+        logger.info("NAS path %s not found, skipping file backfill", nas_path)
+        db.set_state("files_backfilled", "1")
+        return
+
+    artists = {a.handle: a.id for a in db.get_active_artists()}
+    if not artists:
+        db.set_state("files_backfilled", "1")
+        return
+
+    logger.info("Starting one-time file backfill for %d artist(s)", len(artists))
+    total = 0
+
+    for handle, artist_id in artists.items():
+        artist_dir = nas_path / handle
+        if not artist_dir.is_dir():
+            continue
+
+        records = []
+        for root, _, files in os.walk(artist_dir):
+            for f in files:
+                full = Path(root) / f
+                try:
+                    rel = str(full.relative_to(artist_dir))
+                    parts = Path(rel).parts
+                    year = parts[0] if parts and parts[0].isdigit() else "unknown"
+                    size = full.stat().st_size
+                    records.append((rel, year, size))
+                except OSError:
+                    continue
+
+        if records:
+            db.insert_file_records(None, artist_id, records)
+            total += len(records)
+
+    db.set_state("files_backfilled", "1")
+    logger.info("File backfill complete: %d file(s) across %d artist(s)", total, len(artists))

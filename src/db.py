@@ -9,7 +9,7 @@ from src.models import Artist, Job
 
 DEFAULT_DB_PATH = Path("/app/data/inkwell.db")
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS artists (
@@ -93,6 +93,22 @@ def init_schema(conn: sqlite3.Connection) -> None:
     if current_version == 0:
         conn.executescript(SCHEMA_SQL)
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+        conn.commit()
+    if current_version < 3:
+        conn.executescript("""
+            CREATE TABLE IF NOT EXISTS files (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id        INTEGER REFERENCES jobs(id),
+                artist_id     INTEGER NOT NULL REFERENCES artists(id),
+                filename      TEXT NOT NULL,
+                year          TEXT NOT NULL,
+                size_bytes    INTEGER NOT NULL DEFAULT 0,
+                downloaded_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_files_artist_year ON files(artist_id, year);
+            CREATE INDEX IF NOT EXISTS idx_files_job ON files(job_id);
+        """)
+        conn.execute("PRAGMA user_version = 3")
         conn.commit()
 
 
@@ -333,6 +349,56 @@ def get_last_run_summary() -> dict | None:
         "total_bytes": total_bytes,
         "errors": errors,
     }
+
+
+# --- Files ---
+
+
+def insert_file_records(
+    job_id: int | None,
+    artist_id: int,
+    files: list[tuple[str, str, int]],
+) -> None:
+    """Bulk-insert file records. Each tuple is (filename, year, size_bytes)."""
+    if not files:
+        return
+    with _connect() as conn:
+        conn.executemany(
+            "INSERT INTO files (job_id, artist_id, filename, year, size_bytes) VALUES (?, ?, ?, ?, ?)",
+            [(job_id, artist_id, f[0], f[1], f[2]) for f in files],
+        )
+        conn.commit()
+
+
+def get_disk_usage_by_artist() -> dict[int, tuple[int, int]]:
+    """Returns {artist_id: (file_count, total_bytes)}."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT artist_id, COUNT(*) AS file_count, COALESCE(SUM(size_bytes), 0) AS total_bytes "
+            "FROM files GROUP BY artist_id"
+        ).fetchall()
+        return {r["artist_id"]: (r["file_count"], r["total_bytes"]) for r in rows}
+
+
+def get_recent_files(
+    artist_id: int | None = None,
+    since: str | None = None,
+    limit: int = 100,
+) -> list[dict]:
+    """Query files with optional artist and date filters."""
+    with _connect() as conn:
+        query = "SELECT * FROM files WHERE 1=1"
+        params: list = []
+        if artist_id is not None:
+            query += " AND artist_id = ?"
+            params.append(artist_id)
+        if since:
+            query += " AND downloaded_at >= ?"
+            params.append(since)
+        query += " ORDER BY downloaded_at DESC LIMIT ?"
+        params.append(limit)
+        rows = conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
 
 
 # --- Logs ---
