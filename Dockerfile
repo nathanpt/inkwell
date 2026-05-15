@@ -15,9 +15,12 @@ COPY src/ src/
 COPY .streamlit/ .streamlit/
 
 # Copy default configs to /app/config (bind mounts overlay these)
-RUN mkdir -p /app/config
+# and /app/defaults (fallback when bind mount target is missing)
+RUN mkdir -p /app/config /app/defaults
 COPY config.toml /app/config/config.toml
+COPY config.toml /app/defaults/config.toml
 COPY gallery-dl.*.conf /app/config/
+COPY gallery-dl.*.conf /app/defaults/
 
 VOLUME /app/data
 EXPOSE 8501
