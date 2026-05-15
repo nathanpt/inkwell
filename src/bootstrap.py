@@ -49,16 +49,16 @@ def bootstrap(config_path: Path | None = None) -> tuple[sqlite3.Connection, Conf
         orphans = db.clean_orphaned_jobs()
         if orphans:
             logger.info("Cleaned %d orphaned job(s)", orphans)
+
+        # 5. One-time backfill of files table from NAS
+        _backfill_files(config)
+
         _bootstrap_done = True
 
-    # 5. Prune old logs
+    # 6. Prune old logs
     pruned = db.prune_old_logs(config.retention.log_days)
     if pruned:
         logger.info("Pruned %d old log entries", pruned)
-
-    # 6. One-time backfill of files table from NAS
-    if not _bootstrap_done:
-        _backfill_files(config)
 
     # 7. Verify config files exist
     _verify_config_files()
