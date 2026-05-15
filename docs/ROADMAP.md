@@ -16,6 +16,7 @@
 - [ ] Automated SQLite dumps and NAS snapshot scheduling
 - [x] Add functionality to auto-zip downloaded media per artist per year to reduce small-file load on NAS hard drives. This should be able to be performed at the end of a job and retroactively. functionality to disallow re-downloading already downloaded files must be maintained.
 - [x] Structured download history — files table with per-file metadata, replacing NAS filesystem walks for disk usage queries
+- [x] Simplify Downloads tab to show only Job History (remove last run summary, never-downloaded warning, Download All button)
 
 ## Completed
 
