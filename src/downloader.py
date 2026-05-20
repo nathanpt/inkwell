@@ -317,7 +317,11 @@ def _run_gallery_dl(
     if progress_cb:
         t_prog.start()
 
-    proc.wait(timeout=config.download.timeout)
+    try:
+        proc.wait(timeout=config.download.timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait(timeout=5)
     _stop_progress.set()
     t_out.join(timeout=5)
     t_err.join(timeout=5)
