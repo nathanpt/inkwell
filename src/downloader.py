@@ -263,6 +263,9 @@ def _run_gallery_dl(
     ]
     for auth_file in adapter.get_auth_files():
         cmd.extend(["--cookies", str(auth_file)])
+    refresh_token = adapter.get_refresh_token()
+    if refresh_token:
+        cmd.extend(["-o", f"extractor.pixiv.refresh-token={refresh_token}"])
     cmd.append(source_url)
 
     logger.info("Running: %s", " ".join(cmd))

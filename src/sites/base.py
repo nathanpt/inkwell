@@ -35,6 +35,9 @@ class SiteAdapter(ABC):
     def get_auth_files(self) -> list[Path]:
         ...
 
+    def get_refresh_token(self) -> str | None:
+        return None
+
     @abstractmethod
     def is_auth_valid(self) -> bool:
         ...

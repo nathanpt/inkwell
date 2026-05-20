@@ -45,7 +45,12 @@ class PixivAdapter(SiteAdapter):
         return ARCHIVE_DB
 
     def get_auth_files(self) -> list[Path]:
-        return [TOKEN_PATH] if TOKEN_PATH.exists() else []
+        return []
+
+    def get_refresh_token(self) -> str | None:
+        if TOKEN_PATH.exists():
+            return TOKEN_PATH.read_text().strip() or None
+        return None
 
     def is_auth_valid(self) -> bool:
         from src import db
