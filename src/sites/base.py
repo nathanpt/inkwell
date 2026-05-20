@@ -62,6 +62,10 @@ class SiteAdapter(ABC):
     def get_display_handle(self, artist: Artist) -> str:
         ...
 
+    def resolve_handle(self, handle: str) -> str:
+        """Resolve a raw handle to a human-readable name. Returns handle unchanged by default."""
+        return handle
+
 
 class SiteRegistry:
     def __init__(self) -> None:

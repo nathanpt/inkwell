@@ -181,6 +181,15 @@ def update_last_scan(artist_id: int) -> None:
         conn.commit()
 
 
+def update_artist_handle(artist_id: int, handle: str) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE artists SET handle = ? WHERE id = ?",
+            (handle, artist_id),
+        )
+        conn.commit()
+
+
 def get_all_artists() -> list[Artist]:
     with _connect() as conn:
         rows = conn.execute("SELECT * FROM artists ORDER BY added_at").fetchall()

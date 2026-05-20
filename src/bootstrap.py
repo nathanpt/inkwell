@@ -53,6 +53,9 @@ def bootstrap(config_path: Path | None = None) -> tuple[sqlite3.Connection, Conf
         # 5. One-time backfill of files table from NAS
         _backfill_files(config)
 
+        # 6. Migrate numeric Pixiv handles to display names
+        _migrate_pixiv_handles()
+
         _bootstrap_done = True
 
     # 6. Prune old logs
@@ -147,3 +150,19 @@ def _backfill_files(config: Config) -> None:
 
     db.set_state("files_backfilled", "1")
     logger.info("File backfill complete: %d file(s) across %d artist(s)", total, len(artists))
+
+
+def _migrate_pixiv_handles() -> None:
+    """One-time migration to resolve numeric Pixiv handles to display names."""
+    if db.get_state("pixiv_handles_migrated") == "1":
+        return
+
+    from src.sites.pixiv import migrate_pixiv_handles
+
+    try:
+        updated = migrate_pixiv_handles()
+        logger.info("Pixiv handle migration: %d artist(s) updated", updated)
+    except Exception:
+        logger.warning("Pixiv handle migration failed", exc_info=True)
+
+    db.set_state("pixiv_handles_migrated", "1")

@@ -60,6 +60,7 @@ def render_artists():
         if submitted and url:
             try:
                 handle, normalized_url, adapter = validate_url(url)
+                handle = adapter.resolve_handle(handle)
                 existing = db.get_artist_by_url(normalized_url)
                 if existing and existing.is_active:
                     st.error(f"Artist {adapter.get_display_handle(Artist(handle=handle))} is already tracked")
