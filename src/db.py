@@ -505,6 +505,37 @@ def get_file(file_id: int) -> dict | None:
         return dict(row) if row else None
 
 
+def get_all_file_rows() -> list[dict]:
+    """All files joined with artist handle/site. For integrity/repair scans."""
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT f.*, a.handle AS artist_handle, a.site AS artist_site "
+            "FROM files f JOIN artists a ON f.artist_id = a.id"
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def delete_file_records(ids: list[int]) -> int:
+    """Delete files rows by id. Returns count deleted."""
+    if not ids:
+        return 0
+    with _connect() as conn:
+        placeholders = ",".join("?" * len(ids))
+        cur = conn.execute(f"DELETE FROM files WHERE id IN ({placeholders})", ids)
+        conn.commit()
+        return cur.rowcount
+
+
+def update_file_row(file_id: int, filename: str, year: str, size_bytes: int) -> None:
+    """Update a files row's filename/year/size (used when a re-downloaded file's basename differs)."""
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE files SET filename = ?, year = ?, size_bytes = ? WHERE id = ?",
+            (filename, year, size_bytes, file_id),
+        )
+        conn.commit()
+
+
 # --- Logs ---
 
 

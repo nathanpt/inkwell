@@ -41,3 +41,9 @@ cooldown = [5, 15]
 
 [sites.deviantart]
 cooldown = [5, 15]
+
+[integrity]
+enabled = true             # Scheduled integrity check
+check_cron = "0 4 * * 0"   # Weekly Sunday 04:00
+auto_repair = true         # Attempt re-download of missing files after check
+max_posts_per_run = 200    # Cap per scheduled repair run (manual repair is uncapped)

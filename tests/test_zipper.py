@@ -59,6 +59,65 @@ class TestZipYearDir:
         # Corrupt zip should have been cleaned up
         assert not (tmp_path / "2024.zip").exists()
 
+    def test_merges_into_existing_zip_without_losing_entries(self, tmp_path):
+        """THE regression: an incremental download lands new loose files in an
+        already-zipped year (old loose files deleted). The zip must be merged,
+        not overwritten, so previously archived entries survive."""
+        year_dir = tmp_path / "2024"
+        year_dir.mkdir()
+        (year_dir / "new.jpg").write_bytes(b"new")
+
+        # Pre-existing zip holds the prior cycle's only copy of old.jpg
+        zip_path = tmp_path / "2024.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            zf.writestr("old.jpg", b"old")
+
+        result = zip_year_dir(tmp_path, "2024")
+
+        assert result is not None
+        with zipfile.ZipFile(result) as zf:
+            assert set(zf.namelist()) == {"old.jpg", "new.jpg"}
+            assert zf.read("old.jpg") == b"old"
+            assert zf.read("new.jpg") == b"new"
+        assert not year_dir.exists()
+
+    def test_merge_skips_duplicate_arcnames(self, tmp_path):
+        year_dir = tmp_path / "2024"
+        year_dir.mkdir()
+        # Loose old.jpg has different content than the zipped one
+        (year_dir / "old.jpg").write_bytes(b"loose")
+
+        zip_path = tmp_path / "2024.zip"
+        with zipfile.ZipFile(zip_path, "w") as zf:
+            zf.writestr("old.jpg", b"zip")
+
+        result = zip_year_dir(tmp_path, "2024")
+
+        assert result is not None
+        with zipfile.ZipFile(result) as zf:
+            # The existing zipped entry wins; loose duplicate is skipped
+            assert zf.read("old.jpg") == b"zip"
+        assert not year_dir.exists()
+
+    def test_corrupt_existing_zip_renamed_and_rebuilt(self, tmp_path):
+        year_dir = tmp_path / "2024"
+        year_dir.mkdir()
+        (year_dir / "new.jpg").write_bytes(b"new")
+
+        # Write garbage that is not a valid zip
+        zip_path = tmp_path / "2024.zip"
+        zip_path.write_bytes(b"not a zip file")
+
+        result = zip_year_dir(tmp_path, "2024")
+
+        assert result is not None
+        with zipfile.ZipFile(result) as zf:
+            assert set(zf.namelist()) == {"new.jpg"}
+        # Corrupt zip renamed aside, not deleted
+        corrupt_files = list(tmp_path.glob("2024.zip.corrupt-*"))
+        assert len(corrupt_files) == 1
+        assert not year_dir.exists()
+
 
 class TestZipArtistDirs:
     def test_finds_year_dirs(self, tmp_path):

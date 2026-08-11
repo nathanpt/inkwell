@@ -64,6 +64,14 @@ class ZipConfig:
     compression_level: int = 6
 
 
+
+@dataclass
+class IntegrityConfig:
+    enabled: bool = True
+    check_cron: str = "0 4 * * 0"   # weekly, Sunday 04:00
+    auto_repair: bool = True
+    max_posts_per_run: int = 200    # cap for scheduled auto-repair; manual UI repair is uncapped
+
 @dataclass
 class Config:
     nas: NASConfig = field(default_factory=NASConfig)
@@ -74,6 +82,7 @@ class Config:
     retention: RetentionConfig = field(default_factory=RetentionConfig)
     rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
     zip: ZipConfig = field(default_factory=ZipConfig)
+    integrity: IntegrityConfig = field(default_factory=IntegrityConfig)
     sites: dict[str, SiteConfig] = field(default_factory=dict)
 
 
@@ -90,7 +99,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
         cookies=CookiesConfig(**raw.get("cookies", {})),
         auth=AuthConfig(**raw.get("auth", {})),
         retention=RetentionConfig(**raw.get("retention", {})),
-        rate_limit=RateLimitConfig(**raw.get("rate_limit", {})),
+        integrity=IntegrityConfig(**raw.get("integrity", {})),
         zip=ZipConfig(**raw.get("zip", {})),
         sites=sites,
     )

@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import re
+import time
 import zipfile
 from pathlib import Path
 
@@ -34,14 +35,49 @@ def zip_year_dir(
         return None
 
     zip_path = artist_dir / f"{year}.zip"
+    existed_before = zip_path.exists()
+
+    # Detect and sideline a corrupt pre-existing zip so we can rebuild fresh.
+    # Its orphaned entries become "missing" rows recovered by the integrity/
+    # repair phases — we do not try to salvage them here.
+    if existed_before:
+        corrupt = False
+        try:
+            with zipfile.ZipFile(zip_path) as _zf:
+                if _zf.testzip() is not None:
+                    corrupt = True
+        except (zipfile.BadZipFile, OSError):
+            corrupt = True
+        if corrupt:
+            corrupt_path = zip_path.with_name(
+                f"{zip_path.name}.corrupt-{int(time.time())}"
+            )
+            try:
+                zip_path.rename(corrupt_path)
+            except OSError as rename_err:
+                logger.error(
+                    "Could not rename corrupt zip %s: %s", zip_path, rename_err
+                )
+                return None
+            logger.warning(
+                "Existing zip %s is corrupt; renamed to %s, rebuilding",
+                zip_path, corrupt_path,
+            )
+            existed_before = False
 
     try:
-        _create_zip(zip_path, year_dir, files, compression_level)
-        _verify_zip(zip_path, year_dir, files)
+        if not existed_before:
+            _create_zip(zip_path, year_dir, files, compression_level)
+            _verify_zip(zip_path, year_dir, files)
+        else:
+            _merge_into_zip(zip_path, year_dir, files, compression_level)
+            _verify_merged_zip(zip_path, year_dir, files)
     except Exception:
         logger.exception("ZIP creation/verification failed for %s", zip_path)
-        # Remove potentially corrupt zip so we can retry later
-        zip_path.unlink(missing_ok=True)
+        # Only remove a zip we just created; never delete a pre-existing one
+        # whose prior-cycle entries are still intact.
+        if not existed_before:
+            zip_path.unlink(missing_ok=True)
         return None
 
     # Verification passed — safe to delete source files
@@ -93,6 +129,40 @@ def _verify_zip(
         if names_in_zip != expected:
             missing = expected - names_in_zip
             raise RuntimeError(f"ZIP missing files: {missing}")
+
+
+def _merge_into_zip(
+    zip_path: Path, base_dir: Path, files: list[Path], compression_level: int
+) -> None:
+    """Append loose files into an existing zip, skipping arcnames already present."""
+    with zipfile.ZipFile(
+        zip_path, "a", compression=zipfile.ZIP_DEFLATED, compresslevel=compression_level
+    ) as zf:
+        existing = set(zf.namelist())
+        for f in files:
+            arcname = str(f.relative_to(base_dir))
+            if arcname not in existing:
+                zf.write(f, arcname)
+                existing.add(arcname)
+
+
+def _verify_merged_zip(
+    zip_path: Path, base_dir: Path, files: list[Path]
+) -> None:
+    """Verify a merged zip: integrity OK and every loose file's arcname present.
+
+    Unlike ``_verify_zip`` this is a subset check — a merged zip legitimately
+    holds entries from prior cycles that are not among the current loose files.
+    """
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        bad = zf.testzip()
+        if bad is not None:
+            raise RuntimeError(f"Corrupt entry in ZIP: {bad}")
+        names_in_zip = set(zf.namelist())
+        for f in files:
+            arcname = str(f.relative_to(base_dir))
+            if arcname not in names_in_zip:
+                raise RuntimeError(f"ZIP missing merged file: {arcname}")
 
 
 def zip_artist_dirs(

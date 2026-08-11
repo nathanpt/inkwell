@@ -86,6 +86,9 @@ class PixivAdapter(SiteAdapter):
         """Resolve a Pixiv user ID to the artist's display name via the AJAX API."""
         return resolve_pixiv_handle(handle)
 
+    def build_post_url(self, handle: str, post_id: str) -> str | None:
+        return f"https://www.pixiv.net/artworks/{post_id}"
+
 
 def resolve_pixiv_handle(user_id: str) -> str:
     """Resolve a Pixiv user ID to the artist's display name via the AJAX API.

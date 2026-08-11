@@ -64,6 +64,75 @@ Log retention: {config.retention.log_days} days
     with col_info:
         st.caption("Compresses loose files into per-year ZIP archives for each artist, reducing NAS small-file load.")
 
+    # Integrity & repair
+    st.divider()
+    st.subheader("Integrity")
+
+    _render_integrity()
+
+
+def _render_integrity():
+    import json
+    from src.integrity import check_integrity
+    from src.repair import repair_missing
+    from src.url_validator import get_registry
+
+    config = st.session_state.config
+
+    # Last check caption
+    last = db.get_state("integrity:last_check")
+    if last:
+        data = json.loads(last)
+        st.caption(
+            f"Last check: {data['timestamp']} — {data['ok']}/{data['total']} OK, "
+            f"{data['missing']} missing, {data['sibling_zips']} sibling zip(s)"
+        )
+    else:
+        st.caption("Integrity check: never run")
+
+    col_check, col_repair = st.columns(2)
+    with col_check:
+        if st.button("Run Integrity Check", use_container_width=True):
+            def _run_check():
+                try:
+                    check_integrity(config)
+                except Exception as e:
+                    db.insert_log("ERROR", "settings", f"Integrity check failed: {e}")
+
+            threading.Thread(target=_run_check, daemon=True).start()
+            st.info("Integrity check started in background. Check Logs for results.")
+
+    repair_running = db.get_state("repair:running") == "1"
+    with col_repair:
+        if st.button(
+            "Repair Missing Files",
+            use_container_width=True,
+            disabled=repair_running,
+            help="Re-downloads missing files via per-post URLs (uncapped)."
+            if not repair_running
+            else "A repair run is in progress.",
+        ):
+            def _run_repair():
+                try:
+                    repair_missing(config, get_registry())
+                except Exception as e:
+                    db.insert_log("ERROR", "settings", f"Repair failed: {e}")
+
+            threading.Thread(target=_run_repair, daemon=True).start()
+            st.info("Repair started in background. Check Logs for results.")
+
+    last_result = db.get_state("repair:last_result")
+    if last_result:
+        r = json.loads(last_result)
+        resolved = r.get("rows_recovered", 0) + r.get("rows_updated", 0)
+        msg = (
+            f"Last repair: {resolved} recovered/updated, {r.get('rows_deleted', 0)} deleted, "
+            f"{r.get('rows_ambiguous', 0)} ambiguous"
+        )
+        if r.get("aborted_reason"):
+            msg += f" (aborted: {r['aborted_reason']})"
+        st.caption(msg)
+
 
 def _render_xcom_auth():
     adapter = XComAdapter()

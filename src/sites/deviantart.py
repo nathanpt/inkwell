@@ -69,3 +69,6 @@ class DeviantArtAdapter(SiteAdapter):
 
     def get_display_handle(self, artist: Artist) -> str:
         return artist.handle
+
+    def build_post_url(self, handle: str, post_id: str) -> str | None:
+        return f"https://www.deviantart.com/deviation/{post_id}"

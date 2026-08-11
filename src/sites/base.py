@@ -66,6 +66,10 @@ class SiteAdapter(ABC):
         """Resolve a raw handle to a human-readable name. Returns handle unchanged by default."""
         return handle
 
+    def build_post_url(self, handle: str, post_id: str) -> str | None:
+        """URL that re-downloads a single post, or None if unsupported."""
+        return None
+
 
 class SiteRegistry:
     def __init__(self) -> None:

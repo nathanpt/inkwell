@@ -73,3 +73,6 @@ class XComAdapter(SiteAdapter):
 
     def get_display_handle(self, artist: Artist) -> str:
         return f"@{artist.handle}"
+
+    def build_post_url(self, handle: str, post_id: str) -> str | None:
+        return f"https://x.com/{handle}/status/{post_id}"

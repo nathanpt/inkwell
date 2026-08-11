@@ -44,6 +44,18 @@ def create_scheduler(config: Config) -> BackgroundScheduler:
         replace_existing=True,
     )
 
+    if config.integrity.enabled:
+        scheduler.add_job(
+            _scheduled_integrity,
+            trigger=CronTrigger(**parse_cron(config.integrity.check_cron)),
+            id="inkwell_integrity_check",
+            kwargs={"config": config, "registry": create_registry()},
+            replace_existing=True,
+        )
+        logger.info(
+            "Integrity check scheduled with cron: %s", config.integrity.check_cron
+        )
+
     logger.info("Scheduler configured with cron: %s", config.schedule.cron)
     return scheduler
 
@@ -102,3 +114,22 @@ def _scheduled_run(config: Config, registry: SiteRegistry) -> None:
     except Exception as e:
         logger.exception("Scheduled run failed with exception")
         db.insert_log("ERROR", "scheduler", f"Scheduled run failed: {e}")
+
+
+def _scheduled_integrity(config: Config, registry: SiteRegistry) -> None:
+    """Callback for the scheduled integrity-check job."""
+    from src import db
+    from src.integrity import check_integrity
+    from src import repair
+
+    logger.info("Scheduled integrity check starting")
+    try:
+        report = check_integrity(config)
+        if config.integrity.auto_repair and report.missing:
+            logger.info("Auto-repairing %d missing file(s)", len(report.missing))
+            repair.repair_missing(
+                config, registry, max_posts=config.integrity.max_posts_per_run
+            )
+    except Exception as e:
+        logger.exception("Scheduled integrity check failed with exception")
+        db.insert_log("ERROR", "scheduler", f"Scheduled integrity check failed: {e}")
