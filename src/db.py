@@ -178,6 +178,12 @@ def deactivate_artist(artist_id: int) -> None:
         conn.commit()
 
 
+def reactivate_artist(artist_id: int) -> None:
+    with _connect() as conn:
+        conn.execute("UPDATE artists SET is_active = 1 WHERE id = ?", (artist_id,))
+        conn.commit()
+
+
 def update_last_scan(artist_id: int) -> None:
     with _connect() as conn:
         conn.execute(

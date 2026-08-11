@@ -65,7 +65,7 @@ def render_artists():
                 if existing and existing.is_active:
                     st.error(f"Artist {adapter.get_display_handle(Artist(handle=handle))} is already tracked")
                 elif existing and not existing.is_active:
-                    db.deactivate_artist(existing.id)
+                    db.reactivate_artist(existing.id)
                     st.success(f"Reactivated {adapter.get_display_handle(Artist(handle=handle))}")
                     st.rerun()
                 else:
