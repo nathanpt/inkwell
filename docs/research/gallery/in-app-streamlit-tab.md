@@ -1,11 +1,11 @@
 # In-App Streamlit Gallery Tab — Research Card
 
-**Candidate:** `in-app-streamlit-tab` — a "Gallery" tab added to Inkwell's existing Streamlit dashboard (`src/app.py`), per spec `docs/specs/gallery-tab.md`.
-**Sources analyzed (read in full this session):** `docs/specs/gallery-tab.md`; `src/db.py`; `src/zipper.py`; `src/app.py`; `src/config_loader.py`; `pyproject.toml`; `config.toml`.
-**Evidence tags:** `(verified: <file:line>)` = read from code/spec · `(inferred: ...)` = reasoned from code/known behavior · `(unknown — needs hands-on: ...)` = not measurable from docs.
+**Candidate:** `in-app-streamlit-tab` — a "Gallery" tab added to Inkwell's existing Streamlit dashboard (`src/app.py`).
+**Sources analyzed (read in full this session):** `src/db.py`; `src/zipper.py`; `src/app.py`; `src/config_loader.py`; `pyproject.toml`; `config.toml`. The prior in-app gallery spec (`docs/specs/gallery-tab.md`) was also analyzed at research time but has since been **removed** from the repo; its design is captured in this card.
+**Evidence tags:** `(verified: <file:line>)` = read from code · `(verified: spec ...)` / `(verified: in-app gallery spec ...)` = read from the in-app gallery spec (`docs/specs/gallery-tab.md`), which has since been **removed** — its design is preserved in this card · `(inferred: ...)` = reasoned from code/known behavior · `(unknown — needs hands-on: ...)` = not measurable from docs.
 
 ## 1. Storage handling
-Reads loose + zipped via `zipfile.ZipFile.open()`. The spec's `resolve_image(artist_handle, year, filename) -> bytes` transparently handles both storage states: loose files at `{nas}/{artist}/{year}/image.jpg` read directly; zipped files at `{nas}/{artist}/{year}.zip` read via `zipfile.ZipFile.open()` into a `BytesIO` (verified: docs/specs/gallery-tab.md "Architecture → Image resolution").
+Reads loose + zipped via `zipfile.ZipFile.open()`. The spec's `resolve_image(artist_handle, year, filename) -> bytes` transparently handles both storage states: loose files at `{nas}/{artist}/{year}/image.jpg` read directly; zipped files at `{nas}/{artist}/{year}.zip` read via `zipfile.ZipFile.open()` into a `BytesIO` (verified: in-app gallery spec [since removed] "Architecture → Image resolution").
 
 This matches Inkwell's actual steady state: `zip_year_dir` creates `{artist_dir}/{year}.zip`, verifies integrity, then `unlink()`s every loose file and removes the year directory (verified: src/zipper.py `zip_year_dir` — creates `{year}.zip` ~L31, verifies then unlinks loose files L52–56, removes year dir ~L65). `[zip] on_job_complete = true` means loose files exist only transiently between download and zipping (verified: config.toml `[zip]`), so in steady state the resolver is almost always on the zip branch.
 

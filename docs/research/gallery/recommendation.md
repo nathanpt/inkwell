@@ -1,8 +1,9 @@
 # Gallery-Browsing — Recommendation
 
 **Decision:** how Inkwell users browse archived media.
-**Recommended:** `in-app-streamlit-tab` (the existing in-app spec,
-`docs/specs/gallery-tab.md`).
+**Recommended:** `in-app-streamlit-tab` — an in-app Streamlit gallery tab (see
+`in-app-streamlit-tab.md` for the design; the prior `docs/specs/gallery-tab.md`
+spec it analyzed has since been removed from the repo).
 **Fallback:** `komga`, if the in-app performance / deep-zoom unknowns prove
 blocking.
 

@@ -13,7 +13,7 @@ application source**; implementing the winner is a separate, later effort.
 - **[recommendation.md](recommendation.md)** — the recommended option, the
   fallback, and the `?`/unknown items that could change the ranking.
 - Candidate cards (one per option):
-  - [in-app-streamlit-tab.md](in-app-streamlit-tab.md) — the existing in-app spec
+  - [in-app-streamlit-tab.md](in-app-streamlit-tab.md) — an in-app Streamlit gallery tab
   - [komga.md](komga.md) — comic/media server
   - [kavita.md](kavita.md) — comic/manga/ebook server
   - [immich.md](immich.md) — self-hosted photo/video gallery
