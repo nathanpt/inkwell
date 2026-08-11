@@ -2,14 +2,18 @@
 
 ## Post-Task Checklist
 
-After completing any task without errors, update `docs/ROADMAP.md`:
+After completing any roadmap task without errors, update `docs/ROADMAP.md`:
 
 1. Find the relevant roadmap item
 2. Change `- [ ]` to `- [x]`
-3. If the item doesn't exist on the roadmap, add it under the appropriate section before marking it complete
+3. If the item doesn't exist on the roadmap, do not add it
 4. Commit the changes.
 
 Do not skip this step. The roadmap should always reflect the current state of the project.
+
+## Environment
+
+- **This machine is not the production server.** The production Docker container runs on a separate server. Do not assume the local Docker daemon is running the app. Diagnostic commands like `docker exec` or `docker logs` cannot be run here — provide them as instructions for the user to run on the production server instead.
 
 ## Project Conventions
 
