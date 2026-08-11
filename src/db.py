@@ -9,7 +9,7 @@ from src.models import Artist, Job
 
 DEFAULT_DB_PATH = Path("/app/data/inkwell.db")
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS artists (
@@ -109,6 +109,12 @@ def init_schema(conn: sqlite3.Connection) -> None:
             CREATE INDEX IF NOT EXISTS idx_files_job ON files(job_id);
         """)
         conn.execute("PRAGMA user_version = 3")
+        conn.commit()
+    if current_version < 4:
+        conn.executescript("""
+            CREATE INDEX IF NOT EXISTS idx_files_downloaded ON files(downloaded_at DESC);
+        """)
+        conn.execute("PRAGMA user_version = 4")
         conn.commit()
 
 
@@ -393,8 +399,13 @@ def get_recent_files(
     artist_id: int | None = None,
     since: str | None = None,
     limit: int = 100,
+    years: list[str] | None = None,
+    offset: int = 0,
 ) -> list[dict]:
-    """Query files with optional artist and date filters."""
+    """Query files with optional artist, date, and year filters.
+
+    Results are ordered newest-first and paginated via ``limit``/``offset``.
+    """
     with _connect() as conn:
         query = "SELECT * FROM files WHERE 1=1"
         params: list = []
@@ -404,10 +415,74 @@ def get_recent_files(
         if since:
             query += " AND downloaded_at >= ?"
             params.append(since)
-        query += " ORDER BY downloaded_at DESC LIMIT ?"
+        if years:
+            placeholders = ",".join("?" * len(years))
+            query += f" AND year IN ({placeholders})"
+            params.extend(years)
+        query += " ORDER BY downloaded_at DESC LIMIT ? OFFSET ?"
         params.append(limit)
+        params.append(offset)
         rows = conn.execute(query, params).fetchall()
         return [dict(r) for r in rows]
+
+
+def count_files(
+    artist_id: int | None = None, years: list[str] | None = None
+) -> int:
+    """Count files matching the optional artist/year filters."""
+    with _connect() as conn:
+        query = "SELECT COUNT(*) AS n FROM files WHERE 1=1"
+        params: list = []
+        if artist_id is not None:
+            query += " AND artist_id = ?"
+            params.append(artist_id)
+        if years:
+            placeholders = ",".join("?" * len(years))
+            query += f" AND year IN ({placeholders})"
+            params.extend(years)
+        row = conn.execute(query, params).fetchone()
+        return int(row["n"])
+
+
+def gallery_stats(
+    artist_id: int | None = None, years: list[str] | None = None
+) -> tuple[int, int]:
+    """Return ``(file_count, total_bytes)`` for the gallery stats bar."""
+    with _connect() as conn:
+        query = (
+            "SELECT COUNT(*) AS n, COALESCE(SUM(size_bytes), 0) AS total "
+            "FROM files WHERE 1=1"
+        )
+        params: list = []
+        if artist_id is not None:
+            query += " AND artist_id = ?"
+            params.append(artist_id)
+        if years:
+            placeholders = ",".join("?" * len(years))
+            query += f" AND year IN ({placeholders})"
+            params.extend(years)
+        row = conn.execute(query, params).fetchone()
+        return int(row["n"]), int(row["total"])
+
+
+def distinct_years(artist_id: int | None = None) -> list[str]:
+    """Return distinct years for an artist, sorted newest-first."""
+    with _connect() as conn:
+        query = "SELECT DISTINCT year FROM files WHERE 1=1"
+        params: list = []
+        if artist_id is not None:
+            query += " AND artist_id = ?"
+            params.append(artist_id)
+        query += " ORDER BY year DESC"
+        rows = conn.execute(query, params).fetchall()
+        return [r["year"] for r in rows]
+
+
+def get_file(file_id: int) -> dict | None:
+    """Return a single file row by id, or None."""
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM files WHERE id = ?", (file_id,)).fetchone()
+        return dict(row) if row else None
 
 
 # --- Logs ---

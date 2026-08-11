@@ -107,6 +107,50 @@ class TestGetRecentFiles:
         files = db.get_recent_files(limit=5)
         assert len(files) == 5
 
+    def test_filters_by_year(self, db_conn):
+        artist = Artist(handle="testartist", site="x.com", source_url="https://x.com/testartist")
+        artist.id = db.insert_artist(artist)
+
+        db.insert_file_records(None, artist.id, [
+            ("2024/a.jpg", "2024", 100),
+            ("2024/b.jpg", "2024", 200),
+            ("2025/c.png", "2025", 300),
+        ])
+
+        files = db.get_recent_files(artist_id=artist.id, years=["2024"])
+        assert {f["filename"] for f in files} == {"2024/a.jpg", "2024/b.jpg"}
+
+        multi = db.get_recent_files(artist_id=artist.id, years=["2024", "2025"])
+        assert len(multi) == 3
+
+    def test_offset_skips_newest(self, db_conn):
+        artist = Artist(handle="testartist", site="x.com", source_url="https://x.com/testartist")
+        artist.id = db.insert_artist(artist)
+
+        # Insert in order; downloaded_at ties resolve by id ASC, so the LIMIT
+        # page of 5 returns ids 1..5, and offset 5 returns ids 6..10.
+        db.insert_file_records(
+            None, artist.id, [(f"2024/{i}.jpg", "2024", i) for i in range(10)]
+        )
+
+        first_page = db.get_recent_files(artist_id=artist.id, limit=5, offset=0)
+        second_page = db.get_recent_files(artist_id=artist.id, limit=5, offset=5)
+        first_ids = {f["id"] for f in first_page}
+        second_ids = {f["id"] for f in second_page}
+        assert len(first_page) == 5
+        assert len(second_page) == 5
+        assert first_ids.isdisjoint(second_ids)
+
+    def test_default_args_unchanged(self, db_conn):
+        """Existing callers pass only artist_id; defaults must still work."""
+        artist = Artist(handle="testartist", site="x.com", source_url="https://x.com/testartist")
+        artist.id = db.insert_artist(artist)
+        db.insert_file_records(None, artist.id, [("2024/a.jpg", "2024", 100)])
+
+        files = db.get_recent_files(artist_id=artist.id)
+        assert len(files) == 1
+        assert files[0]["filename"] == "2024/a.jpg"
+
 
 class TestNewFileRecords:
     def test_extracts_year_from_path(self):
@@ -207,4 +251,39 @@ class TestSchemaMigration:
         assert tables is not None
 
         version = db_conn.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 3
+        assert version == 4
+
+    def test_v3_to_v4_migration(self, tmp_path):
+        """An existing v3 DB gets the downloaded_at index and bumps to v4."""
+        db_path = tmp_path / "v3.db"
+        db.configure(db_path)
+        conn = db.connect(db_path)
+        # Stand up a v3 schema: base tables + files table, pinned to v3.
+        conn.executescript(db.SCHEMA_SQL)
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS files (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id        INTEGER REFERENCES jobs(id),
+                artist_id     INTEGER NOT NULL REFERENCES artists(id),
+                filename      TEXT NOT NULL,
+                year          TEXT NOT NULL,
+                size_bytes    INTEGER NOT NULL DEFAULT 0,
+                downloaded_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_files_artist_year ON files(artist_id, year);
+            CREATE INDEX IF NOT EXISTS idx_files_job ON files(job_id);
+            """
+        )
+        conn.execute("PRAGMA user_version = 3")
+        conn.commit()
+
+        db.init_schema(conn)
+
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
+        assert version == 4
+        idx = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_files_downloaded'"
+        ).fetchone()
+        assert idx is not None
+        conn.close()

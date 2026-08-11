@@ -75,11 +75,12 @@ def _render_dashboard():
 
     from src.sections.artists import render_artists
     from src.sections.downloads import render_downloads
+    from src.sections.gallery import render_gallery
     from src.sections.logs import render_logs
     from src.sections.settings import render_settings
 
-    tab_artists, tab_downloads, tab_settings, tab_logs = st.tabs(
-        ["Artists", "Downloads", "Settings", "Logs"]
+    tab_artists, tab_downloads, tab_gallery, tab_settings, tab_logs = st.tabs(
+        ["Artists", "Downloads", "Gallery", "Settings", "Logs"]
     )
 
     with tab_artists:
@@ -87,6 +88,9 @@ def _render_dashboard():
 
     with tab_downloads:
         render_downloads()
+
+    with tab_gallery:
+        render_gallery()
 
     with tab_settings:
         render_settings()
