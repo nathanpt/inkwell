@@ -8,7 +8,7 @@
 - [x] Interactive architecture flow diagram (docs/architecture.html)
 - [x] Interactive workflow diagram with JSON-driven flows (docs/workflows.html)
 - [ ] MkDocs + Material theme documentation site, deployed to GitHub Pages
-- [ ] Image gallery integration (Piwigo, Komga)
+- [ ] Image gallery — in-app Streamlit tab (recommended over Komga/Kavita; see docs/research/gallery/recommendation.md)
 - [ ] Discord/Telegram notifications on new archival
 - [ ] Toggle zip on/off from the Settings UI (currently config-file only)
 - [x] Download scheduling with time windows and stale-only filtering
