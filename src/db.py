@@ -407,11 +407,22 @@ def get_recent_files(
     limit: int = 100,
     years: list[str] | None = None,
     offset: int = 0,
+    order: str = "desc",
 ) -> list[dict]:
     """Query files with optional artist, date, and year filters.
 
-    Results are ordered newest-first and paginated via ``limit``/``offset``.
+    Results are ordered post-chronologically by the numeric post ID that every
+    site's gallery-dl config writes as the leading token of the filename
+    basename (X snowflake / Pixiv illust id / DeviantArt deviation id — all
+    monotonic with post time). ``order`` selects direction: ``"desc"`` (default)
+    = newest-posted first, ``"asc"`` = oldest-posted first. Paginated via
+    ``limit``/``offset``; direction is applied in SQL so both directions page
+    correctly. Non-numeric basenames (CAST→0) fall back to ``downloaded_at``,
+    i.e. today's archive-time behavior.
     """
+    if order not in ("asc", "desc"):
+        raise ValueError(f"order must be 'asc' or 'desc', got {order!r}")
+    direction = "DESC" if order == "desc" else "ASC"
     with _connect() as conn:
         query = "SELECT * FROM files WHERE 1=1"
         params: list = []
@@ -425,7 +436,10 @@ def get_recent_files(
             placeholders = ",".join("?" * len(years))
             query += f" AND year IN ({placeholders})"
             params.extend(years)
-        query += " ORDER BY downloaded_at DESC LIMIT ? OFFSET ?"
+        query += (
+            f" ORDER BY CAST(SUBSTR(filename, INSTR(filename, '/') + 1) AS INTEGER) {direction},"
+            f" downloaded_at {direction}, id {direction} LIMIT ? OFFSET ?"
+        )
         params.append(limit)
         params.append(offset)
         rows = conn.execute(query, params).fetchall()

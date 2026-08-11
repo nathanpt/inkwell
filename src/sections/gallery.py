@@ -127,11 +127,14 @@ def render_gallery() -> None:
                 st.rerun()
 
     # --- Thumbnail grid ---
+    order = "desc" if sort == "Newest first" else "asc"
     rows = db.get_recent_files(
-        artist_id=aid, years=year_filter, limit=PAGE_SIZE, offset=page * PAGE_SIZE
+        artist_id=aid,
+        years=year_filter,
+        limit=PAGE_SIZE,
+        offset=page * PAGE_SIZE,
+        order=order,
     )
-    if sort == "Oldest first":
-        rows = list(reversed(rows))
 
     image_rows = [r for r in rows if gallery_media.is_image(r["filename"])]
     if not image_rows:

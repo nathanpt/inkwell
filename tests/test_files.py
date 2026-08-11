@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -150,6 +151,87 @@ class TestGetRecentFiles:
         files = db.get_recent_files(artist_id=artist.id)
         assert len(files) == 1
         assert files[0]["filename"] == "2024/a.jpg"
+
+    def test_numeric_prefix_order_across_digit_lengths(self, db_conn):
+        """Numeric, not lexical, sort: a 19-digit ID outranks a 17-digit one
+        even though lexical DESC would rank '9' before '1'."""
+        artist = Artist(handle="testartist", site="x.com", source_url="https://x.com/testartist")
+        artist.id = db.insert_artist(artist)
+        db.insert_file_records(None, artist.id, [
+            ("2024/99999999999999999_a.jpg", "2024", 100),  # 17-digit
+            ("2024/1000000000000000000_b.jpg", "2024", 200),  # 19-digit
+        ])
+        files = db.get_recent_files(artist_id=artist.id)
+        # Default DESC by numeric prefix → 19-digit (b) first. A lexical DESC
+        # would put '99999…' first, so this pair discriminates the two.
+        assert files[0]["filename"] == "2024/1000000000000000000_b.jpg"
+        assert files[1]["filename"] == "2024/99999999999999999_a.jpg"
+
+    def test_asc_and_desc_direction(self, db_conn):
+        artist = Artist(handle="testartist", site="x.com", source_url="https://x.com/testartist")
+        artist.id = db.insert_artist(artist)
+        db.insert_file_records(None, artist.id, [
+            ("2024/200_mid.jpg", "2024", 100),
+            ("2024/100_old.jpg", "2024", 100),
+            ("2024/300_new.jpg", "2024", 100),
+        ])
+        desc = db.get_recent_files(artist_id=artist.id, order="desc")
+        asc = db.get_recent_files(artist_id=artist.id, order="asc")
+        assert [f["filename"] for f in desc] == [
+            "2024/300_new.jpg",
+            "2024/200_mid.jpg",
+            "2024/100_old.jpg",
+        ]
+        assert [f["filename"] for f in asc] == [
+            "2024/100_old.jpg",
+            "2024/200_mid.jpg",
+            "2024/300_new.jpg",
+        ]
+
+    def test_asc_pagination_walks_forward_in_time(self, db_conn):
+        """'Oldest first' must paginate the true oldest, not reverse a page."""
+        artist = Artist(handle="testartist", site="x.com", source_url="https://x.com/testartist")
+        artist.id = db.insert_artist(artist)
+        db.insert_file_records(
+            None,
+            artist.id,
+            [(f"2024/{i:03d}.jpg", "2024", i) for i in range(30)],
+        )
+        page0 = db.get_recent_files(artist_id=artist.id, limit=5, offset=0, order="asc")
+        page1 = db.get_recent_files(artist_id=artist.id, limit=5, offset=5, order="asc")
+        assert [f["filename"] for f in page0] == [
+            "2024/000.jpg", "2024/001.jpg", "2024/002.jpg", "2024/003.jpg", "2024/004.jpg",
+        ]
+        assert [f["filename"] for f in page1] == [
+            "2024/005.jpg", "2024/006.jpg", "2024/007.jpg", "2024/008.jpg", "2024/009.jpg",
+        ]
+
+    def test_non_numeric_basename_falls_back_to_downloaded_at(self, db_conn):
+        """A basename with no numeric prefix (CAST→0) ties on the ID key and
+        sorts by downloaded_at — degraded to today's archive-time behavior."""
+        artist = Artist(handle="testartist", site="x.com", source_url="https://x.com/testartist")
+        artist.id = db.insert_artist(artist)
+        db_conn.execute(
+            "INSERT INTO files (job_id, artist_id, filename, year, size_bytes, downloaded_at) "
+            "VALUES (NULL, ?, '2024/title-one.jpg', '2024', 100, '2024-01-01T00:00:00')",
+            (artist.id,),
+        )
+        db_conn.execute(
+            "INSERT INTO files (job_id, artist_id, filename, year, size_bytes, downloaded_at) "
+            "VALUES (NULL, ?, '2024/title-two.jpg', '2024', 100, '2025-01-01T00:00:00')",
+            (artist.id,),
+        )
+        db_conn.commit()
+        desc = db.get_recent_files(artist_id=artist.id, order="desc")
+        asc = db.get_recent_files(artist_id=artist.id, order="asc")
+        # DESC → newer downloaded_at first; ASC → older first.
+        assert desc[0]["filename"] == "2024/title-two.jpg"
+        assert asc[0]["filename"] == "2024/title-one.jpg"
+
+    def test_invalid_order_raises_valueerror(self, db_conn):
+        """order is interpolated into SQL, so it must be whitelisted."""
+        with pytest.raises(ValueError, match="order must be"):
+            db.get_recent_files(order="sideways")
 
 
 class TestNewFileRecords:
