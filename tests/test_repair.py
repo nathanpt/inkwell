@@ -197,10 +197,49 @@ class TestRepairRateLimit:
         with patch("src.repair._run_batch", side_effect=fake_batch):
             result = repair_missing(config, registry)
 
-        assert result.aborted_reason == "rate limited"
+        assert result.aborted_reason is None  # per-site now, not a hard stop
+        assert result.sites_aborted == ["x.com"]
         # record_hit raised the x.com multiplier above 1.0
         from src.rate_limiter import get_cooldown_multiplier
         assert get_cooldown_multiplier("x.com") > 1.0
+
+
+class TestRepairPerSiteContinue:
+    def test_other_site_continues_after_one_aborts(self, setup, monkeypatch):
+        config, registry, nas = setup
+        # Register pixiv alongside x.com
+        from src.sites.pixiv import PixivAdapter
+        registry.register(PixivAdapter())
+
+        alice = _make_artist(handle="alice", site="x.com")
+        _insert_file(alice.id, "2024/111_a.jpg", "2024")
+        bob = _make_artist(handle="bob", site="pixiv")
+        _insert_file(bob.id, "2024/555_art.jpg", "2024")
+
+        monkeypatch.setattr("src.repair.time.sleep", lambda *_: None)
+
+        def fake_batch(urls, config, adapter):
+            if adapter.name == "x.com":
+                return subprocess.CompletedProcess(
+                    args=[], returncode=1, stdout="", stderr="HTTP 429 Too Many Requests"
+                )
+            # pixiv: write the expected file
+            ydir = nas / "bob" / "2024"
+            ydir.mkdir(parents=True, exist_ok=True)
+            for url in urls:
+                pid = url.rsplit("/", 1)[-1]
+                (ydir / f"{pid}_art.jpg").write_bytes(b"x")
+            return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+        with patch("src.repair._run_batch", side_effect=fake_batch):
+            result = repair_missing(config, registry)
+
+        # x.com aborted; pixiv kept going and recovered bob's row
+        assert result.sites_aborted == ["x.com"]
+        assert result.rows_recovered == 1
+        filenames = {r["filename"] for r in db.get_all_file_rows()}
+        assert "2024/555_art.jpg" in filenames   # pixiv recovered
+        assert "2024/111_a.jpg" in filenames      # x.com kept by safeguard
 
 
 class TestRepairGuard:

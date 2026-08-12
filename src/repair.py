@@ -6,7 +6,7 @@ import random
 import re
 import subprocess
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 from src import db
@@ -23,7 +23,10 @@ from src.sites.base import SiteAdapter, SiteRegistry
 logger = logging.getLogger(__name__)
 
 POST_ID_RE = re.compile(r"^(\d+)")
-CHUNK_SIZE = 25
+# Smaller bursts land more files before a site's rate window trips; the between-
+# chunk cooldown then paces the next burst. Tunable — the per-chunk logs show the
+# actual landing rate so this can be dialed in.
+CHUNK_SIZE = 10
 MAX_RATE_LIMIT_RETRIES = 3
 
 
@@ -38,7 +41,8 @@ class RepairResult:
     rows_ambiguous: int = 0      # multiple candidates; kept, needs manual look
     rows_unsupported: int = 0    # non-numeric ID or adapter can't build a URL
     artists_no_recovery: int = 0  # systemic failure guard; rows kept
-    aborted_reason: str | None = None
+    sites_aborted: list = field(default_factory=list)  # sites skipped mid-run (rate/auth)
+    aborted_reason: str | None = None  # hard stop only ("already running")
 
 
 def extract_post_id(filename: str) -> str | None:
@@ -87,6 +91,9 @@ def repair_missing(
     Runs in a background thread; the connection-per-operation db helpers are
     thread-safe by design. ``max_posts`` caps the total posts attempted this run
     (scheduled auto-repair passes a cap; the manual UI action is uncapped).
+
+    Rate-limit and auth failures are handled per site: a site that exhausts its
+    retries is skipped for the rest of the run while remaining sites continue.
     """
     if db.get_state("repair:running") == "1":
         db.insert_log("WARNING", "repair", "Repair already running, aborting")
@@ -94,6 +101,7 @@ def repair_missing(
 
     db.set_state("repair:running", "1")
     result = RepairResult()
+    run_start = time.time()
     try:
         # Sibling-only rows recover with no network — do this first.
         merged, _ = consolidate_all_sibling_zips(config)
@@ -103,18 +111,29 @@ def repair_missing(
         result.missing_before = len(report.missing)
 
         if not report.missing:
+            _store_result(result, run_start)
             return result
 
         # Group missing rows by (site, handle), preserving rows per artist.
         groups: dict[tuple[str, str], list[MissingRow]] = {}
+        per_site: dict[str, int] = {}
         for r in report.missing:
             groups.setdefault((r.site, r.handle), []).append(r)
+            per_site[r.site] = per_site.get(r.site, 0) + 1
+
+        site_summary = ", ".join(f"{s}: {n}" for s, n in sorted(per_site.items()))
+        db.insert_log(
+            "INFO", "repair",
+            f"Repair starting: {result.missing_before} missing across "
+            f"{len(per_site)} site(s) ({site_summary}); chunk size {CHUNK_SIZE}",
+        )
 
         nas_path = Path(config.nas.mount_path)
+        aborted_sites: set[str] = set()
 
         for (site, handle), rows in groups.items():
-            if result.aborted_reason:
-                break
+            if site in aborted_sites:
+                continue
             try:
                 adapter = registry.get(site)
             except ValueError:
@@ -131,12 +150,15 @@ def repair_missing(
 
             # Partition rows by post id; drop non-numeric as unsupported.
             by_pid: dict[str, list[MissingRow]] = {}
+            unsupported_here = 0
             for r in rows:
                 pid = extract_post_id(r.filename)
                 if pid is None:
-                    result.rows_unsupported += 1
+                    unsupported_here += 1
                     continue
                 by_pid.setdefault(pid, []).append(r)
+            if unsupported_here:
+                result.rows_unsupported += unsupported_here
 
             # Build the URL list, honouring the global post cap.
             attempted: list[tuple[str, str, list[MissingRow]]] = []  # (url, pid, rows)
@@ -153,22 +175,36 @@ def repair_missing(
             if not attempted:
                 continue
 
+            db.insert_log(
+                "INFO", "repair",
+                f"{handle} ({site}): {len(rows)} row(s), {len(attempted)} post(s) to fetch"
+                + (f", {unsupported_here} unsupported" if unsupported_here else ""),
+            )
+
             cooldown = config.sites.get(site, SiteConfig()).cooldown
             chunk_list = list(_chunks(attempted, CHUNK_SIZE))
+            # Only rows whose chunk actually executed reach reconciliation, so a
+            # site abort mid-artist never deletes rows we never tried to fetch.
+            run_rows: list[MissingRow] = []
+            site_aborted = False
             for ci, chunk in enumerate(chunk_list):
                 urls = [u for (u, _, _) in chunk]
-                handled = False
+                run_rows.extend(r for (_, _, prows) in chunk for r in prows)
                 for attempt in range(MAX_RATE_LIMIT_RETRIES + 1):
+                    t0 = time.time()
                     proc = _run_batch(urls, config, adapter)
+                    dt = time.time() - t0
                     stderr = proc.stderr or ""
                     if adapter.detect_auth_error(stderr):
                         adapter.mark_auth_invalid()
-                        result.aborted_reason = "auth error"
+                        aborted_sites.add(site)
+                        result.sites_aborted.append(site)
                         db.insert_log(
                             "ERROR", "repair",
-                            f"Auth error for {handle} ({site}); aborting repair",
+                            f"{site}: auth error on {handle} chunk {ci + 1}/{len(chunk_list)} "
+                            f"({dt:.1f}s); marking auth invalid, skipping site",
                         )
-                        handled = True
+                        site_aborted = True
                         break
                     if adapter.detect_rate_limit_error(stderr):
                         record_hit(site, config.rate_limit)
@@ -176,38 +212,44 @@ def repair_missing(
                             backoff = 60 * (2 ** attempt)
                             db.insert_log(
                                 "WARNING", "repair",
-                                f"Rate limited on {site}; retrying chunk in {backoff}s",
+                                f"{site}: rate-limited on {handle} chunk {ci + 1}/{len(chunk_list)} "
+                                f"({dt:.1f}s); backoff {backoff}s "
+                                f"(attempt {attempt + 1}/{MAX_RATE_LIMIT_RETRIES + 1})",
                             )
                             time.sleep(backoff)
                             continue
-                        result.aborted_reason = "rate limited"
+                        aborted_sites.add(site)
+                        result.sites_aborted.append(site)
                         db.insert_log(
                             "WARNING", "repair",
-                            f"Rate limit retries exhausted on {site}; aborting repair",
+                            f"{site}: rate-limit retries exhausted; skipping remaining work on site",
                         )
-                        handled = True
+                        site_aborted = True
                         break
                     record_success(site, config.rate_limit)
-                    handled = True
+                    db.insert_log(
+                        "INFO", "repair",
+                        f"{handle} chunk {ci + 1}/{len(chunk_list)}: {len(urls)} post(s) "
+                        f"in {dt:.1f}s (rc={proc.returncode})",
+                    )
                     break
-                if result.aborted_reason:
-                    break
-                if not handled:
+                if site_aborted:
                     break
                 # Pace between chunks (not after the last one).
                 if ci < len(chunk_list) - 1:
-                    delay = random.uniform(*cooldown) * get_cooldown_multiplier(site)
+                    mult = get_cooldown_multiplier(site)
+                    delay = random.uniform(*cooldown) * mult
+                    db.insert_log(
+                        "INFO", "repair",
+                        f"cooldown {delay:.0f}s (multiplier {mult:.1f})",
+                    )
                     time.sleep(delay)
 
-            if result.aborted_reason:
-                break
-
-            attempted_rows = [r for (_, _, prows) in attempted for r in prows]
-            _reconcile_artist(nas_path, handle, attempted_rows, result)
+            _reconcile_artist(nas_path, handle, run_rows, result)
     finally:
         db.set_state("repair:running", "0")
 
-    _store_result(result)
+    _store_result(result, run_start)
     return result
 
 
@@ -232,7 +274,7 @@ def _reconcile_artist(
         claimed_by_year[y] = set()
 
     to_delete: list[int] = []
-    recovered_or_updated = 0
+    recovered = updated = ambiguous = 0
     for r in rows:
         base = Path(r.filename).name
         pid = extract_post_id(r.filename)
@@ -241,8 +283,8 @@ def _reconcile_artist(
 
         if base in actual:
             claimed.add(base)
+            recovered += 1
             result.rows_recovered += 1
-            recovered_or_updated += 1
             continue
 
         candidates = [
@@ -253,9 +295,10 @@ def _reconcile_artist(
             cand = candidates[0]
             claimed.add(cand)
             db.update_file_row(r.file_id, f"{r.year}/{cand}", r.year, actual[cand])
+            updated += 1
             result.rows_updated += 1
-            recovered_or_updated += 1
         elif len(candidates) > 1:
+            ambiguous += 1
             result.rows_ambiguous += 1
             logger.warning(
                 "Ambiguous recovery for %s row %d: %d candidates", handle, r.file_id, len(candidates)
@@ -266,23 +309,38 @@ def _reconcile_artist(
     # Deletion safeguard: only delete when at least one row proved gallery-dl
     # could reach this artist's posts. A systemic failure (rename, auth) keeps
     # all rows so the operator can intervene.
-    if recovered_or_updated > 0:
-        result.rows_deleted += db.delete_file_records(to_delete)
+    deleted = 0
+    if recovered + updated > 0:
+        deleted = db.delete_file_records(to_delete)
+        result.rows_deleted += deleted
     elif to_delete:
         result.artists_no_recovery += 1
-        logger.warning(
-            "No recovery for %s; keeping %d row(s) (safeguard)", handle, len(to_delete)
+        db.insert_log(
+            "WARNING", "repair",
+            f"{handle}: no files recovered from {len(to_delete)} row(s); keeping all (safeguard)",
         )
 
+    db.insert_log(
+        "INFO", "repair",
+        f"reconcile {handle}: {recovered} recovered, {updated} updated, "
+        f"{deleted} deleted, {ambiguous} ambiguous (of {len(rows)} attempted)",
+    )
 
-def _store_result(result: RepairResult) -> None:
+
+def _store_result(result: RepairResult, run_start: float) -> None:
     db.set_state("repair:last_result", json.dumps(asdict(result)))
     resolved = result.rows_recovered + result.rows_updated
+    elapsed = max(time.time() - run_start, 0.001)
+    rate = resolved / elapsed * 60
     level = "INFO" if resolved > 0 or result.missing_before == 0 else "WARNING"
-    db.insert_log(
-        level,
-        "repair",
-        f"Repair done: {resolved} recovered/updated, {result.rows_deleted} deleted, "
-        f"{result.rows_ambiguous} ambiguous, {result.rows_unsupported} unsupported"
-        + (f" (aborted: {result.aborted_reason})" if result.aborted_reason else ""),
-    )
+    parts = [
+        f"Repair done in {elapsed:.0f}s: {resolved} recovered/updated ({rate:.1f} files/min)",
+        f"{result.rows_deleted} deleted",
+        f"{result.rows_ambiguous} ambiguous",
+        f"{result.rows_unsupported} unsupported",
+    ]
+    if result.sites_aborted:
+        parts.append("sites aborted: " + ", ".join(sorted(set(result.sites_aborted))))
+    if result.aborted_reason:
+        parts.append(f"aborted: {result.aborted_reason}")
+    db.insert_log(level, "repair", ", ".join(parts))
