@@ -45,6 +45,33 @@ class TestInsertFileRecords:
         row = db_conn.execute("SELECT job_id FROM files").fetchone()
         assert row["job_id"] is None
 
+    def test_reinsert_larger_size_keeps_one_row_at_larger(self, db_conn):
+        """A re-emission of a recorded file updates size_bytes to the larger value."""
+        artist = Artist(handle="testartist", site="x.com", source_url="https://x.com/testartist")
+        artist.id = db.insert_artist(artist)
+
+        db.insert_file_records(None, artist.id, [("2024/img.jpg", "2024", 100)])
+        db.insert_file_records(None, artist.id, [("2024/img.jpg", "2024", 200)])
+
+        rows = db_conn.execute(
+            "SELECT filename, size_bytes FROM files"
+        ).fetchall()
+        assert len(rows) == 1
+        assert rows[0]["size_bytes"] == 200
+
+    def test_reinsert_smaller_size_keeps_stored_size(self, db_conn):
+        """A smaller re-download must not shrink the stored (higher-quality) size."""
+        artist = Artist(handle="testartist", site="x.com", source_url="https://x.com/testartist")
+        artist.id = db.insert_artist(artist)
+
+        db.insert_file_records(None, artist.id, [("2024/img.jpg", "2024", 200)])
+        db.insert_file_records(None, artist.id, [("2024/img.jpg", "2024", 100)])
+
+        row = db_conn.execute(
+            "SELECT size_bytes FROM files WHERE filename = '2024/img.jpg'"
+        ).fetchone()
+        assert row["size_bytes"] == 200
+
 
 class TestGetDiskUsageByArtist:
     def test_returns_grouped_usage(self, db_conn):
@@ -333,7 +360,7 @@ class TestSchemaMigration:
         assert tables is not None
 
         version = db_conn.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 4
+        assert version == 5
 
     def test_v3_to_v4_migration(self, tmp_path):
         """An existing v3 DB gets the downloaded_at index and bumps to v4."""
@@ -363,9 +390,66 @@ class TestSchemaMigration:
         db.init_schema(conn)
 
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 4
+        assert version == 5
         idx = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_files_downloaded'"
         ).fetchone()
         assert idx is not None
+        conn.close()
+
+    def test_v4_to_v5_migration_dedups(self, tmp_path):
+        """An existing v4 DB collapses duplicate files and enforces uniqueness."""
+        db_path = tmp_path / "v4.db"
+        db.configure(db_path)
+        conn = db.connect(db_path)
+        # Stand up a v4 schema: base tables + files table + downloaded index, pinned to v4.
+        conn.executescript(db.SCHEMA_SQL)
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS files (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                job_id        INTEGER REFERENCES jobs(id),
+                artist_id     INTEGER NOT NULL REFERENCES artists(id),
+                filename      TEXT NOT NULL,
+                year          TEXT NOT NULL,
+                size_bytes    INTEGER NOT NULL DEFAULT 0,
+                downloaded_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_files_artist_year ON files(artist_id, year);
+            CREATE INDEX IF NOT EXISTS idx_files_job ON files(job_id);
+            CREATE INDEX IF NOT EXISTS idx_files_downloaded ON files(downloaded_at DESC);
+            """
+        )
+        conn.execute("PRAGMA user_version = 4")
+        conn.commit()
+
+        # Seed one artist, then two duplicate rows for the same (artist_id, filename):
+        # the duplicate is larger (200) and lands later than the original (100), so the
+        # higher-quality row is the one that must survive.
+        conn.execute(
+            "INSERT INTO artists (handle, site, source_url) VALUES ('a1', 'x.com', 'https://x.com/a1')"
+        )
+        artist_id = conn.execute("SELECT id FROM artists").fetchone()[0]
+        conn.executemany(
+            "INSERT INTO files (artist_id, filename, year, size_bytes, downloaded_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            [
+                (artist_id, "2024/img.jpg", "2024", 100, "2024-01-01 00:00:00"),
+                (artist_id, "2024/img.jpg", "2024", 200, "2024-01-02 00:00:00"),
+            ],
+        )
+        conn.commit()
+
+        db.init_schema(conn)
+
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
+        idx = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_files_artist_filename'"
+        ).fetchone()
+        assert idx is not None
+        rows = conn.execute(
+            "SELECT size_bytes FROM files WHERE filename = '2024/img.jpg'"
+        ).fetchall()
+        assert len(rows) == 1
+        assert rows[0]["size_bytes"] == 200
         conn.close()

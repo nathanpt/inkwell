@@ -163,11 +163,7 @@ def _render_detail(nas_path: Path, handle: str, row: dict) -> None:
         st.warning("File not found on disk")
         return
 
-    source = (
-        "zip"
-        if gallery_media.source_zip_path(nas_path, handle, year).is_file()
-        else "live"
-    )
+    source = gallery_media.resolve_file_source(nas_path, handle, year, filename)
     st.image(data, use_container_width=True)
     st.caption(
         f"{filename} · {_format_bytes(row['size_bytes'])} · {year} · source: {source}"

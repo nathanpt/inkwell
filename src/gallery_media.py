@@ -70,6 +70,28 @@ def read_media_bytes(
 
     return None
 
+def resolve_file_source(
+    nas_path: Path, artist_handle: str, year: str, filename: str
+) -> str:
+    """Return where a file actually lives: 'live' (loose), 'zip', or 'missing'.
+
+    Loose files are transient (zipped on job completion); the zip is the steady
+    state. Used by the gallery detail caption so the label is per-file, not the
+    per-year heuristic it replaces.
+    """
+    if (nas_path / artist_handle / filename).is_file():
+        return "live"
+    zp = source_zip_path(nas_path, artist_handle, year)
+    if zp.is_file():
+        entry = _zip_entry(year, filename)
+        try:
+            with zipfile.ZipFile(zp) as zf:
+                if entry in set(zf.namelist()):
+                    return "zip"
+        except (zipfile.BadZipFile, OSError):
+            logger.warning("Could not read zip %s for source check", zp)
+    return "missing"
+
 
 def thumb_path_for(artist_handle: str, year: str, filename: str) -> Path:
     """Return the thumbnail cache path for a file.

@@ -9,7 +9,7 @@ from src.models import Artist, Job
 
 DEFAULT_DB_PATH = Path("/app/data/inkwell.db")
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS artists (
@@ -115,6 +115,27 @@ def init_schema(conn: sqlite3.Connection) -> None:
             CREATE INDEX IF NOT EXISTS idx_files_downloaded ON files(downloaded_at DESC);
         """)
         conn.execute("PRAGMA user_version = 4")
+        conn.commit()
+    if current_version < 5:
+        # Collapse duplicate (artist_id, filename) rows, keeping the higher-quality
+        # one (larger size_bytes, then latest downloaded_at, then largest id), then
+        # enforce uniqueness so a gallery-dl re-emission can never add a row.
+        conn.executescript("""
+            DELETE FROM files
+             WHERE id NOT IN (
+                SELECT id FROM (
+                    SELECT id,
+                           ROW_NUMBER() OVER (
+                               PARTITION BY artist_id, filename
+                               ORDER BY size_bytes DESC, downloaded_at DESC, id DESC
+                           ) AS rn
+                      FROM files
+                ) WHERE rn = 1
+             );
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_files_artist_filename
+                ON files(artist_id, filename);
+        """)
+        conn.execute("PRAGMA user_version = 5")
         conn.commit()
 
 
@@ -380,12 +401,23 @@ def insert_file_records(
     artist_id: int,
     files: list[tuple[str, str, int]],
 ) -> None:
-    """Bulk-insert file records. Each tuple is (filename, year, size_bytes)."""
+    """Upsert file records keyed by (artist_id, filename).
+
+    Each tuple is (filename, year, size_bytes). A fresh (artist_id, filename)
+    inserts normally; a re-emission of an already-recorded file (a gallery-dl
+    archive.db gap) matches the unique index and updates only ``size_bytes`` to
+    the larger of the stored and landed sizes — so a genuinely larger
+    re-download wins, a smaller/equal one keeps the stored size. The existing
+    row's job_id, downloaded_at and id are preserved.
+    """
     if not files:
         return
     with _connect() as conn:
         conn.executemany(
-            "INSERT INTO files (job_id, artist_id, filename, year, size_bytes) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO files (job_id, artist_id, filename, year, size_bytes) "
+            "VALUES (?, ?, ?, ?, ?) "
+            "ON CONFLICT(artist_id, filename) DO UPDATE SET "
+            "size_bytes = MAX(files.size_bytes, excluded.size_bytes)",
             [(job_id, artist_id, f[0], f[1], f[2]) for f in files],
         )
         conn.commit()

@@ -80,6 +80,47 @@ class TestReadMediaBytes:
         )
 
 
+class TestResolveFileSource:
+    def test_loose_file_is_live(self, tmp_path):
+        nas = tmp_path / "nas"
+        (nas / "tester" / "2024").mkdir(parents=True)
+        (nas / "tester" / "2024" / "photo.jpg").write_bytes(_png_bytes())
+
+        assert (
+            gallery_media.resolve_file_source(nas, "tester", "2024", "2024/photo.jpg")
+            == "live"
+        )
+
+    def test_zip_entry_is_zip(self, tmp_path):
+        """No loose file but the basename entry lives in {year}.zip -> 'zip'."""
+        nas = tmp_path / "nas"
+        year_dir = nas / "tester" / "2024"
+        year_dir.mkdir(parents=True)
+        (year_dir / "photo.jpg").write_bytes(_png_bytes())
+
+        with zipfile.ZipFile(
+            nas / "tester" / "2024.zip", "w", zipfile.ZIP_DEFLATED, compresslevel=6
+        ) as zf:
+            zf.write(year_dir / "photo.jpg", "photo.jpg")
+
+        # Steady state: loose file gone.
+        (year_dir / "photo.jpg").unlink()
+        year_dir.rmdir()
+
+        assert (
+            gallery_media.resolve_file_source(nas, "tester", "2024", "2024/photo.jpg")
+            == "zip"
+        )
+
+    def test_neither_is_missing(self, tmp_path):
+        nas = tmp_path / "nas"
+        (nas / "tester").mkdir(parents=True)
+        assert (
+            gallery_media.resolve_file_source(nas, "tester", "2024", "2024/none.jpg")
+            == "missing"
+        )
+
+
 class TestThumbnails:
     def _seed_loose(self, nas: Path) -> bytes:
         (nas / "tester" / "2024").mkdir(parents=True)
