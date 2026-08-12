@@ -1,22 +1,23 @@
 # Project Progress
 
 **Last assessed:** 2026-08-11
-**Repository state:** branch `main` · HEAD `9dc7f00` ("logs: add Export Logs download button"); working tree holds only this untracked `PROGRESS.md` — all code committed and pushed to `origin`.
+**Repository state:** branch `main` · HEAD `063eccf` ("repair: wait for rate-limit window instead of skipping artists"); `origin/main` lags at `9dc7f00` (two local commits unpushed — no-push policy in `AGENTS.md`). This assessment creates `ARCHITECTURE.md` and reconciles `AGENTS.md` + `PROGRESS.md`.
 
 ## Canonical sources
 
 | Role | File | Notes |
 |------|------|-------|
-| Architecture / system map | `docs/DESIGN.md` | Strong, human-maintained. Partially stale — see "Open tasks". |
+| Architecture / codemap | `ARCHITECTURE.md` | Stable entry points, directory map, data flow, boundaries, invariants. Read first. |
+| Deep design rationale | `docs/DESIGN.md` | The "why" + historical decisions. Partially stale on current structure — see "Open tasks". |
 | Roadmap / planning | `docs/ROADMAP.md` | Live checklist of planned + completed work. |
 | Agent instructions | `AGENTS.md` | Routing contract + project conventions. |
 | Onboarding / quickstart | `README.md` | Features, install, config schema, dev commands. |
 
-There is intentionally **no separate `ARCHITECTURE.md`**: `docs/DESIGN.md` already owns that role. Update DESIGN.md rather than forking a second map.
+`ARCHITECTURE.md` is the stable codemap (current tree, boundaries, invariants); `docs/DESIGN.md` holds the deeper design rationale. Keep structure/boundary facts current in `ARCHITECTURE.md`; defer the "why" and historical decisions to `DESIGN.md`.
 
 ## Confirmed working surfaces
 
-- **Tests:** `.venv/bin/python -m pytest tests/ -q` → **176 passed** (observed 2026-08-11, ~1.3s). Local venv runs Python 3.14.4; production image is `python:3.12-slim` (Dockerfile).
+- **Tests:** `.venv/bin/python -m pytest tests/ -q` → **179 passed** (observed 2026-08-11, ~1.3s). Local venv runs Python 3.14.4; production image is `python:3.12-slim` (Dockerfile).
 - **Entry point:** `streamlit run src/app.py` (compose `CMD`). `main()` → `bootstrap()` → scheduler setup → dashboard render. See `src/app.py`.
 - **Schema:** SQLite, `PRAGMA user_version = 4`. Migrations: v2→v3 added the `files` table; v3→v4 added `idx_files_downloaded`. See `src/db.py`, `src/bootstrap.py`.
 - **Download engine:** `gallery-dl` invoked as subprocess from `src/downloader.py`; one artist at a time, per-artist job lock, directory-diff metrics.
@@ -26,11 +27,13 @@ There is intentionally **no separate `ARCHITECTURE.md`**: `docs/DESIGN.md` alrea
 - **Scheduling:** APScheduler via `src/scheduler.py`; cron from `config.toml`.
 - **Repair & integrity:** `src/integrity.py` reports missing files; `src/repair.py` re-downloads them via per-post gallery-dl URLs and reconciles rows (`_reconcile_artist`: exact basename match + numeric-post-id prefix). Repair now parses gallery-dl PipeOutput stdout (`_downloaded_paths`), relocates files written under a renamed-author dir back into `nas/{handle}/{year}/` (`_relocate_renamed`), and logs per-chunk file counts, a stderr-tail WARNING on unclassified non-zero exits, and a rename hint when 0 rows recover despite gallery-dl success.
 - **Logs tab + export:** `src/sections/logs.py` renders the Logs tab; "Export Logs" downloads the filtered entries (level/source/limit) as plain text via `_format_export` (newest-first, `job_id`/`artist_id` inline when present).
+- **Rate limiting:** `src/rate_limiter.py` tracks a per-site backoff multiplier; a site "pauses" at `pause_threshold`, but the pause is **time-bounded** by `pause_seconds` (default 900s) since the last hit, so it auto-clears once the upstream window passes. Repair (`src/repair.py`) *waits* for un-pause via `_wait_for_unpause`; the downloader skips (the scheduler retries).
 
 ## Active work
 
-- **Repair diagnostics + rename-author recovery** (`ff218cb`) and **Export Logs button** (`9dc7f00`): both on `main` and pushed to `origin`; full suite green at 176. Remaining unverified surface is the Streamlit UI itself — the app can't boot in this dev env (hardcodes container path `/app/defaults/config.toml`), so the Export Logs button and the new per-chunk repair logs / rename WARNING must be confirmed on the production container.
-- Gallery post-chronological sort (`6d232c3`) shipped earlier; its UI manual smoke (Newest/Oldest first on an X artist) is still unverified on the production container.
+- **Rate-limit wait fix** (`063eccf`, local-only): repair now waits for the rate window to clear instead of skipping all of a paused site's artists; the pause is time-bounded so previously-stuck sites self-unblock on next deploy. Full suite green at 179.
+- **Repair diagnostics + rename-author recovery** (`ff218cb`) and **Export Logs button** (`9dc7f00`): on `main`; `ff218cb` + `063eccf` are local-only (`origin/main` lags at `9dc7f00`). Remaining unverified surface is the Streamlit UI itself — the app can't boot in this dev env (loads container config paths), so the Export Logs button, per-chunk repair logs, rename WARNING, and rate-limit-wait behavior must be confirmed on the production container.
+- Gallery post-chronological sort (`6d232c3`) shipped earlier; its UI manual smoke is still unverified on the production container.
 
 ## Open tasks and technical debt
 
@@ -46,10 +49,12 @@ Each item is sourced; none is invented.
 - [ ] **`docs/DEV_GUIDE.md` is a near-empty stub** (dev-server + test command only). Source: 345-byte file.
 - [ ] **`.factory/` is an empty vestigial directory.** Source: `ls .factory` (no contents).
 - [ ] **Logs source-filter dropdown is incomplete.** Source: `src/sections/logs.py:51` — options are `["All", "downloader", "scheduler", "bootstrap"]`, omitting `repair` (and integrity). Repair logs only surface when Source = "All", which limits the new Export Logs button for repair debugging.
+- [ ] **Duplicated `RateLimitConfig`.** Source: `src/config_loader.py:48` and `src/rate_limiter.py:14` each define `RateLimitConfig`; `Config.rate_limit` uses the `config_loader` one while the limiter functions access it duck-typed. They must be kept in sync — adding `pause_seconds` to only one broke a downloader test this session. Collapse to a single definition.
+- [ ] **`README.md` config schema is stale.** Source: `README.md:95-99` — the `[rate_limit]` example omits `pause_seconds` (added this session); the onboarding config block otherwise lags `config.toml`.
 
 ## Verification status
 
-- **Passing:** `pytest` — 176 passed (full suite, observed this assessment).
+- **Passing:** `pytest` — 179 passed (full suite, observed this assessment).
 - **Not verified in CI:** tests are not part of `build.yml`; a regression can ship to `main` green-image but red-tests.
 - **Not run this assessment:** the Streamlit app itself (not launched here), Docker build, gallery-dl subprocess (requires credentials + NAS).
 
@@ -65,6 +70,6 @@ Each item is sourced; none is invented.
 
 ## Next useful checks
 
-- The Streamlit app can't boot in this dev env (`bootstrap()` → `load_config()` hardcodes `/app/defaults/config.toml`, a container path), so UI smoke (gallery sort, Export Logs button, repair per-chunk logs / rename WARNING) must run on the production container, not this machine.
+- The Streamlit app can't boot in this dev env (`bootstrap()` → `load_config()` reads container paths `/app/config/config.toml` with a `/app/defaults/` fallback baked into the image), so UI/behavior smoke (gallery sort, Export Logs button, repair per-chunk logs / rename WARNING, rate-limit-wait on a paused site) must run on the production container, not this machine.
 - Add a test step to `.github/workflows/build.yml` so regressions are caught before image push.
 - Reconcile `docs/DESIGN.md` §4.1/§10/§13/§14 with the current tree (or mark those sections as "see ROADMAP.md for live status").

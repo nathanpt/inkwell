@@ -4,7 +4,8 @@
 
 Before non-trivial changes, read:
 
-- **`docs/DESIGN.md`** — canonical architecture/system map (stack, data model, components, deployment). Update it rather than forking a second architecture doc.
+- **`ARCHITECTURE.md`** — stable architecture codemap: entry points, directory map, data flow, external boundaries, and load-bearing invariants. Read this first for "where things are and how they fit." Update it when stable structure, entry points, data flow, or boundaries change.
+- **`docs/DESIGN.md`** — deep design rationale and historical decisions (the "why"). Partially stale on current structure; defer to `ARCHITECTURE.md` for the live tree.
 - **`PROGRESS.md`** — live status: working surfaces, active work, open tech debt, and verification results (test counts, CI gaps).
 - **`docs/ROADMAP.md`** — planned vs. completed work (the post-task checklist below updates this).
 
@@ -32,7 +33,7 @@ Do not skip this step. The roadmap should always reflect the current state of th
 ## Project Conventions
 
 - **Storage layout:** Media is organized as `/nas/inkwell/{artist_handle}/{year}/`
-- **Config files:** Bind-mounted read-only from repo (`config.toml`, `gallery-dl.conf`)
+- **Config files:** Bind-mounted read-only from repo (`config.toml`, `gallery-dl.{xcom,pixiv,deviantart}.conf`)
 - **Database:** SQLite with WAL mode in a named Docker volume (`/app/data/inkwell.db`)
 - **gallery-dl:** Invoked as a subprocess, never as a library
 - **archive.db:** Fully owned by gallery-dl — Inkwell never reads or writes it
