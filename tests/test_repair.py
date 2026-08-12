@@ -416,3 +416,105 @@ class TestRepairRateLimitWait:
         msgs = [lg["message"] for lg in db.get_logs(source="repair")]
         assert any("waiting up to" in m for m in msgs)
         assert not any("still rate-limit paused after waiting" in m for m in msgs)
+
+    def test_chunk_retry_waits_out_window(self, setup, monkeypatch):
+        import time as _time
+        from src.rate_limiter import RateLimitConfig
+        config, registry, nas = setup
+        config.rate_limit = RateLimitConfig(
+            multiplier_step=8.0, max_multiplier=16.0,
+            pause_threshold=6.0, pause_seconds=120,
+        )
+        artist = _make_artist()
+        _insert_file(artist.id, "2024/111_a.jpg", "2024")
+
+        # Shared fake clock; repair's sleep advances it so the rate window
+        # elapses during the chunk-retry wait (no pre-seeded hits, so the
+        # artist-level check does not pause).
+        clock = [1000.0]
+        monkeypatch.setattr(_time, "time", lambda: clock[0])
+        monkeypatch.setattr(
+            "src.repair.time.sleep", lambda s: clock.__setitem__(0, clock[0] + s)
+        )
+
+        calls = {"n": 0}
+
+        def fake_batch(urls, config, adapter):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return subprocess.CompletedProcess(
+                    args=[], returncode=1, stdout="", stderr="HTTP 429 Too Many Requests"
+                )
+            ydir = nas / "alice" / "2024"
+            ydir.mkdir(parents=True, exist_ok=True)
+            for url in urls:
+                pid = url.rsplit("/", 1)[-1]
+                (ydir / f"{pid}_a.jpg").write_bytes(b"data")
+            return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+        with patch("src.repair._run_batch", side_effect=fake_batch):
+            result = repair_missing(config, registry)
+
+        assert result.rows_recovered == 1
+        assert result.sites_aborted == []
+        msgs = [lg["message"] for lg in db.get_logs(source="repair")]
+        assert sum("waiting up to" in m for m in msgs) == 1
+        assert sum("backoff 60s (attempt 1/4)" in m for m in msgs) == 1
+
+
+class TestRepairAuthSkip:
+    def test_invalid_auth_site_skipped_without_fetch(self, setup, monkeypatch):
+        config, registry, nas = setup
+        from src.sites.pixiv import PixivAdapter
+        registry.register(PixivAdapter())
+
+        artist = _make_artist(handle="bob", site="pixiv")
+        _insert_file(artist.id, "2024/555_art.jpg", "2024")
+        db.set_state("auth_valid:pixiv", "0")
+
+        with patch("src.repair._run_batch") as mock_batch:
+            result = repair_missing(config, registry)
+
+        assert mock_batch.call_count == 0
+        assert "pixiv" in result.sites_aborted
+        assert len(db.get_all_file_rows()) == 1
+        warns = [
+            lg["message"]
+            for lg in db.get_logs(source="repair")
+            if lg["level"] == "WARNING"
+        ]
+        assert any("auth flagged invalid" in m for m in warns)
+
+    def test_valid_site_still_runs_when_other_invalid(self, setup, monkeypatch):
+        config, registry, nas = setup
+        from src.sites.pixiv import PixivAdapter
+        registry.register(PixivAdapter())
+
+        bob = _make_artist(handle="bob", site="pixiv")
+        _insert_file(bob.id, "2024/555_art.jpg", "2024")
+        alice = _make_artist(handle="alice", site="x.com")
+        _insert_file(alice.id, "2024/111_a.jpg", "2024")
+        db.set_state("auth_valid:pixiv", "0")
+
+        monkeypatch.setattr("src.repair.time.sleep", lambda *_: None)
+
+        def fake_batch(urls, config, adapter):
+            if adapter.name == "x.com":
+                ydir = nas / "alice" / "2024"
+                ydir.mkdir(parents=True, exist_ok=True)
+                for url in urls:
+                    pid = url.rsplit("/", 1)[-1]
+                    (ydir / f"{pid}_a.jpg").write_bytes(b"x")
+                return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+            raise AssertionError("pixiv must not be fetched when auth is invalid")
+
+        with patch("src.repair._run_batch", side_effect=fake_batch) as mock_batch:
+            result = repair_missing(config, registry)
+
+        assert result.sites_aborted == ["pixiv"]
+        assert result.rows_recovered == 1
+        sites_called = [call.args[2].name for call in mock_batch.call_args_list]
+        assert sites_called == ["x.com"]
+        filenames = {r["filename"] for r in db.get_all_file_rows()}
+        assert "2024/111_a.jpg" in filenames   # x.com recovered
+        assert "2024/555_art.jpg" in filenames  # pixiv row left untouched

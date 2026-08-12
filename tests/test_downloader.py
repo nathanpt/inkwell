@@ -247,3 +247,64 @@ class TestSitePause:
         # Only the pixiv artist should have been downloaded
         assert len(jobs) == 1
         assert jobs[0].artist_id == artist2.id
+
+
+class TestAuthInvalidSiteSkip:
+    def test_download_all_skips_invalid_auth_site(self, db_conn, test_config, test_registry):
+        from src.sites.pixiv import PixivAdapter
+        test_registry.register(PixivAdapter())
+
+        artist = Artist(handle="p1", site="pixiv", source_url="https://www.pixiv.net/users/111")
+        artist.id = db.insert_artist(artist)
+        db.set_state("auth_valid:pixiv", "0")
+
+        with patch("src.downloader._run_gallery_dl") as mock_gdl:
+            jobs = download_all(test_config, test_registry)
+
+        assert mock_gdl.call_count == 0
+        assert jobs == []
+        assert db.get_recent_jobs() == []
+        warns = [
+            lg["message"]
+            for lg in db.get_logs(source="downloader")
+            if lg["level"] == "WARNING"
+        ]
+        assert any("auth flagged invalid" in m for m in warns)
+
+    def test_download_all_still_downloads_valid_site(self, db_conn, test_config, test_registry):
+        from src.sites.pixiv import PixivAdapter
+        test_registry.register(PixivAdapter())
+
+        pix = Artist(handle="p1", site="pixiv", source_url="https://www.pixiv.net/users/111")
+        pix.id = db.insert_artist(pix)
+        x = Artist(handle="ok", site="x.com", source_url="https://x.com/ok")
+        x.id = db.insert_artist(x)
+        db.set_state("auth_valid:pixiv", "0")
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stderr = ""
+
+        with patch("src.downloader._run_gallery_dl", return_value=mock_result):
+            jobs = download_all(test_config, test_registry)
+
+        # Only x.com downloaded; pixiv skipped without creating a job.
+        assert len(jobs) == 1
+        assert jobs[0].artist_id == x.id
+        assert jobs[0].status == "success"
+
+    def test_download_stale_skips_invalid_auth_site(self, db_conn, test_config, test_registry):
+        from src.downloader import download_stale
+        from src.sites.pixiv import PixivAdapter
+        test_registry.register(PixivAdapter())
+
+        artist = Artist(handle="p1", site="pixiv", source_url="https://www.pixiv.net/users/111")
+        artist.id = db.insert_artist(artist)
+        db.set_state("auth_valid:pixiv", "0")
+
+        with patch("src.downloader._run_gallery_dl") as mock_gdl:
+            jobs = download_stale(test_config, test_registry, 30)
+
+        assert mock_gdl.call_count == 0
+        assert jobs == []
+        assert db.get_recent_jobs() == []

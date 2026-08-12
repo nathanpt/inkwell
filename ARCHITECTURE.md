@@ -67,6 +67,7 @@ src/
   sections/           Streamlit tab renderers: artists, downloads, gallery, settings, logs
   sites/              SiteAdapter ABC + SiteRegistry; xcom, pixiv, deviantart adapters
 tests/                Pytest suite mirroring src/ (see "Testing" below; conftest.py fixtures)
+scripts/             Operational scripts: analyze_rate_limits.py (offline rate-limit/repair analyzer over a copied DB; stdlib-only, imports nothing from src)
 docs/                 DESIGN.md (deep design), ROADMAP.md, DEV_GUIDE.md, research/, diagrams
 config.toml           App config (bind-mounted read-only)
 gallery-dl.{xcom,pixiv,deviantart}.conf   Per-site gallery-dl configs (bind-mounted read-only)
@@ -85,12 +86,15 @@ pyproject.toml           Dependencies (uv)
 - **Download pipeline (`src/downloader.py`):** one artist at a time behind a per-artist job lock;
   snapshots the artist dir before/after `gallery-dl` to derive `file_count`/`total_bytes`; records
   a success (decaying the rate-limit multiplier) or a rate/auth failure; triggers auto-zip on
-  success. `download_all` / `download_stale` are the two entry points.
+  success. `download_all` / `download_stale` are the two entry points; both skip artists whose
+  site auth is flagged invalid before creating a job.
 - **Integrity + repair pipeline:** `src/integrity.py` reports missing files (DB rows with no loose
   file, accounting for sibling zips); `src/repair.py::repair_missing` re-fetches them in chunks via
   per-post gallery-dl URLs, then `_reconcile_artist` matches landed files back to rows (exact
   basename, then numeric-post-id prefix), and `_relocate_renamed` moves files gallery-dl wrote
-  under a renamed-author dir back into the canonical `nas/{handle}/{year}/`.
+  under a renamed-author dir back into the canonical `nas/{handle}/{year}/`. Sites flagged
+  `auth_valid:<site> == "0"` are skipped before any fetch, and a chunk that 429s waits out the
+  rate window (via `_wait_for_unpause`) before its retry.
 - **Rate limiter (`src/rate_limiter.py`):** per-site `cooldown_multiplier` (×`multiplier_step` per
   hit, capped at `max_multiplier`, decays by `decay_rate` per success). A site is "paused" at
   `pause_threshold`; the pause is **time-bounded** by `pause_seconds` since the last hit, so it

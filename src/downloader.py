@@ -18,6 +18,20 @@ from src import zipper
 logger = logging.getLogger(__name__)
 
 
+def _auth_invalid_sites(artists: list[Artist], registry: SiteRegistry) -> set[str]:
+    """Sites whose auth is flagged invalid; logged once per site so runs skip them quietly."""
+    invalid: set[str] = set()
+    for site in {a.site for a in artists}:
+        if not registry.get(site).is_auth_valid():
+            invalid.add(site)
+            db.insert_log(
+                "WARNING", "downloader",
+                f"Skipping all {site} downloads: auth flagged invalid — "
+                f"re-authenticate in Settings",
+            )
+    return invalid
+
+
 def download_artist(
     artist: Artist,
     config: Config,
@@ -157,8 +171,13 @@ def download_all(
         db.insert_log("ERROR", "downloader", "NAS unavailable, aborting download run")
         return []
 
+    invalid = _auth_invalid_sites(artists, registry)
+
     jobs: list[Job] = []
     for i, artist in enumerate(artists):
+        if artist.site in invalid:
+            continue
+
         # Check if site is paused due to rate limiting
         if is_site_paused(artist.site, config.rate_limit):
             logger.warning("Skipping %s — site %s is rate-limit paused", artist.handle, artist.site)
@@ -223,8 +242,13 @@ def download_stale(
         db.insert_log("ERROR", "downloader", "NAS unavailable, aborting stale download run")
         return []
 
+    invalid = _auth_invalid_sites(stale, registry)
+
     jobs: list[Job] = []
     for i, artist in enumerate(stale):
+        if artist.site in invalid:
+            continue
+
         if is_site_paused(artist.site, config.rate_limit):
             logger.warning("Skipping %s — site %s is rate-limit paused", artist.handle, artist.site)
             db.insert_log("WARNING", "downloader", f"Skipping {artist.handle}: site {artist.site} is rate-limit paused")

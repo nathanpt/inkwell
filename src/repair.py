@@ -42,7 +42,7 @@ class RepairResult:
     rows_ambiguous: int = 0      # multiple candidates; kept, needs manual look
     rows_unsupported: int = 0    # non-numeric ID or adapter can't build a URL
     artists_no_recovery: int = 0  # systemic failure guard; rows kept
-    sites_aborted: list = field(default_factory=list)  # sites skipped mid-run (rate/auth)
+    sites_aborted: list = field(default_factory=list)  # skipped up-front (invalid auth) or mid-run (rate limit/auth error)
     aborted_reason: str | None = None  # hard stop only ("already running")
 
 
@@ -219,8 +219,25 @@ def repair_missing(
         nas_path = Path(config.nas.mount_path)
         aborted_sites: set[str] = set()
 
+        # Sites whose auth is already flagged invalid: skip all their artists up
+        # front instead of discovering the dead session on the first chunk.
+        auth_invalid_sites: set[str] = set()
+        for site in per_site:
+            try:
+                site_adapter = registry.get(site)
+            except ValueError:
+                continue  # unknown sites are reported per-group below as unsupported
+            if not site_adapter.is_auth_valid():
+                auth_invalid_sites.add(site)
+                db.insert_log(
+                    "WARNING", "repair",
+                    f"Site {site}: auth flagged invalid; skipping "
+                    f"{per_site[site]} missing row(s) — re-authenticate in Settings",
+                )
+        result.sites_aborted.extend(sorted(auth_invalid_sites))
+
         for (site, handle), rows in groups.items():
-            if site in aborted_sites:
+            if site in aborted_sites or site in auth_invalid_sites:
                 continue
             try:
                 adapter = registry.get(site)
@@ -313,6 +330,9 @@ def repair_missing(
                                 f"(attempt {attempt + 1}/{MAX_RATE_LIMIT_RETRIES + 1})",
                             )
                             time.sleep(backoff)
+                            # Never retry into a still-hot rate window.
+                            if is_site_paused(site, config.rate_limit):
+                                _wait_for_unpause(site, config)
                             continue
                         aborted_sites.add(site)
                         result.sites_aborted.append(site)

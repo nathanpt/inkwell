@@ -35,7 +35,7 @@ on_job_complete = true
 compression_level = 6
 
 [sites.xcom]
-cooldown = [30, 60]
+cooldown = [60, 120]
 
 [sites.pixiv]
 cooldown = [5, 15]

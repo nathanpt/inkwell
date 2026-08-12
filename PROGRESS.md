@@ -1,7 +1,7 @@
 # Project Progress
 
-**Last assessed:** 2026-08-11
-**Repository state:** branch `main` · HEAD `063eccf` ("repair: wait for rate-limit window instead of skipping artists"); `origin/main` lags at `9dc7f00` (two local commits unpushed — no-push policy in `AGENTS.md`). This assessment creates `ARCHITECTURE.md` and reconciles `AGENTS.md` + `PROGRESS.md`.
+**Last assessed:** 2026-08-12
+**Repository state:** branch `main` · local-only commits ahead of `origin/main` (`9dc7f00`); latest adds up-front auth-invalid site skips (repair + downloads), x.com pacing (`sleep-request` + cooldown), chunk-retry rate-window waits, and `scripts/analyze_rate_limits.py`. No-push policy in `AGENTS.md`.
 
 ## Canonical sources
 
@@ -17,7 +17,7 @@
 
 ## Confirmed working surfaces
 
-- **Tests:** `.venv/bin/python -m pytest tests/ -q` → **179 passed** (observed 2026-08-11, ~1.3s). Local venv runs Python 3.14.4; production image is `python:3.12-slim` (Dockerfile).
+- **Tests:** `.venv/bin/python -m pytest tests/ -q` → **195 passed** (observed 2026-08-12, ~1.5s). Local venv runs Python 3.14.4; production image is `python:3.12-slim` (Dockerfile).
 - **Entry point:** `streamlit run src/app.py` (compose `CMD`). `main()` → `bootstrap()` → scheduler setup → dashboard render. See `src/app.py`.
 - **Schema:** SQLite, `PRAGMA user_version = 4`. Migrations: v2→v3 added the `files` table; v3→v4 added `idx_files_downloaded`. See `src/db.py`, `src/bootstrap.py`.
 - **Download engine:** `gallery-dl` invoked as subprocess from `src/downloader.py`; one artist at a time, per-artist job lock, directory-diff metrics.
@@ -31,7 +31,8 @@
 
 ## Active work
 
-- **Rate-limit wait fix** (`063eccf`, local-only): repair now waits for the rate window to clear instead of skipping all of a paused site's artists; the pause is time-bounded so previously-stuck sites self-unblock on next deploy. Full suite green at 179.
+- **Rate-limit wait fix** (`063eccf`, local-only): repair now waits for the rate window to clear instead of skipping all of a paused site's artists; the pause is time-bounded so previously-stuck sites self-unblock on next deploy.
+- **Auth skip + x.com pacing + offline analyzer** (local-only): repair (`repair_missing`) and the download drivers (`download_all`/`download_stale`) now skip sites whose auth is flagged invalid (`auth_valid:<site> == "0"`) before any fetch/job — one WARNING per site instead of a failing run. x.com pacing raised: `gallery-dl.xcom.conf` gains `sleep-request: 6` and `[sites.xcom] cooldown` → `[60, 120]` (repair between-chunk only; downloads rely on request-level spacing). A chunk that 429s now waits out the rate window via `_wait_for_unpause` before its retry. New `scripts/analyze_rate_limits.py` is a stdlib-only, read-only offline analyzer over a copied DB (per-day 429 hits/aborts/pause-waits/chunk throughput, limiter state, repair-run summaries). Full suite green at 195.
 - **Repair diagnostics + rename-author recovery** (`ff218cb`) and **Export Logs button** (`9dc7f00`): on `main`; `ff218cb` + `063eccf` are local-only (`origin/main` lags at `9dc7f00`). Remaining unverified surface is the Streamlit UI itself — the app can't boot in this dev env (loads container config paths), so the Export Logs button, per-chunk repair logs, rename WARNING, and rate-limit-wait behavior must be confirmed on the production container.
 - Gallery post-chronological sort (`6d232c3`) shipped earlier; its UI manual smoke is still unverified on the production container.
 
@@ -55,7 +56,7 @@ Each item is sourced; none is invented.
 
 ## Verification status
 
-- **Passing:** `pytest` — 179 passed (full suite, observed this assessment).
+- **Passing:** `pytest` — 195 passed (full suite, observed this assessment).
 - **Not verified in CI:** tests are not part of `build.yml`; a regression can ship to `main` green-image but red-tests.
 - **Not run this assessment:** the Streamlit app itself (not launched here), Docker build, gallery-dl subprocess (requires credentials + NAS).
 
