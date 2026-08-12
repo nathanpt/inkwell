@@ -374,3 +374,45 @@ class TestRepairDiagnosticsRename:
             if lg["level"] == "WARNING"
         ]
         assert any("Possible author rename" in m and "find" in m for m in msgs)
+
+
+class TestRepairRateLimitWait:
+    def test_paused_site_waited_for_not_skipped(self, setup, monkeypatch):
+        import time as _time
+        from src.rate_limiter import RateLimitConfig, record_hit
+        config, registry, nas = setup
+        config.rate_limit = RateLimitConfig(
+            multiplier_step=2.0, max_multiplier=16.0,
+            pause_threshold=6.0, pause_seconds=60,
+        )
+        artist = _make_artist()
+        _insert_file(artist.id, "2024/111_a.jpg", "2024")
+
+        # Shared fake clock so the rate window elapses during repair's wait.
+        clock = [1000.0]
+        monkeypatch.setattr(_time, "time", lambda: clock[0])
+        for _ in range(3):
+            record_hit("x.com", config.rate_limit)  # paused, last_hit_ts=1000
+
+        # Repair's sleep advances the clock so _wait_for_unpause completes.
+        monkeypatch.setattr(
+            "src.repair.time.sleep", lambda s: clock.__setitem__(0, clock[0] + s)
+        )
+
+        def fake_batch(urls, config, adapter):
+            ydir = nas / "alice" / "2024"
+            ydir.mkdir(parents=True, exist_ok=True)
+            for url in urls:
+                pid = url.rsplit("/", 1)[-1]
+                (ydir / f"{pid}_a.jpg").write_bytes(b"data")
+            return subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="", stderr=""
+            )
+
+        with patch("src.repair._run_batch", side_effect=fake_batch):
+            result = repair_missing(config, registry)
+
+        assert result.rows_recovered == 1
+        msgs = [lg["message"] for lg in db.get_logs(source="repair")]
+        assert any("waiting up to" in m for m in msgs)
+        assert not any("still rate-limit paused after waiting" in m for m in msgs)

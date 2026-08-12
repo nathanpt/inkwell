@@ -152,6 +152,25 @@ def _relocate_renamed(nas_path: Path, handle: str, downloaded: set[Path]) -> int
             pass
     return moved
 
+
+def _wait_for_unpause(site: str, config: Config) -> None:
+    """Wait for a rate-limit pause to clear instead of abandoning the artist.
+
+    The pause auto-expires once the rate window since the last hit passes (see
+    ``is_site_paused``); this polls until it does, bounded by ``pause_seconds``
+    so a run never blocks indefinitely.
+    """
+    pause_seconds = config.rate_limit.pause_seconds
+    db.insert_log(
+        "INFO", "repair",
+        f"Site {site} rate-limit paused; waiting up to {pause_seconds}s "
+        f"for the rate window to clear",
+    )
+    deadline = time.time() + pause_seconds
+    while time.time() < deadline and is_site_paused(site, config.rate_limit):
+        time.sleep(30)
+
+
 def repair_missing(
     config: Config, registry: SiteRegistry, max_posts: int | None = None
 ) -> RepairResult:
@@ -211,11 +230,14 @@ def repair_missing(
                 continue
 
             if is_site_paused(site, config.rate_limit):
-                db.insert_log(
-                    "WARNING", "repair",
-                    f"Site {site} rate-limit paused; skipping {handle} ({len(rows)} row(s))",
-                )
-                continue
+                _wait_for_unpause(site, config)
+                if is_site_paused(site, config.rate_limit):
+                    db.insert_log(
+                        "WARNING", "repair",
+                        f"Site {site} still rate-limit paused after waiting; "
+                        f"skipping {handle} ({len(rows)} row(s))",
+                    )
+                    continue
 
             # Partition rows by post id; drop non-numeric as unsupported.
             by_pid: dict[str, list[MissingRow]] = {}

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+import time
+
 from src import db
 from src.rate_limiter import (
     RateLimitConfig,
@@ -72,3 +75,26 @@ class TestRateLimiter:
         assert get_cooldown_multiplier("x.com") == 4.0
         assert get_cooldown_multiplier("pixiv") == 2.0
         assert get_cooldown_multiplier("deviantart") == 1.0
+
+    def test_pause_clears_after_window(self, db_conn, monkeypatch):
+        config = RateLimitConfig(
+            multiplier_step=2.0, max_multiplier=16.0,
+            pause_threshold=6.0, pause_seconds=100,
+        )
+        clock = [1000.0]
+        monkeypatch.setattr(time, "time", lambda: clock[0])
+        for _ in range(3):
+            record_hit("x.com", config)  # 2.0 -> 4.0 -> 8.0, last_hit_ts=1000
+        assert is_site_paused("x.com", config)       # within window
+        clock[0] = 1099.0
+        assert is_site_paused("x.com", config)       # 99s elapsed, still paused
+        clock[0] = 1100.0
+        assert not is_site_paused("x.com", config)   # 100s elapsed -> unpaused
+
+    def test_legacy_state_without_timestamp_unblocks(self, db_conn):
+        # A site stuck paused before last_hit_ts existed must not stay paused.
+        config = RateLimitConfig(pause_threshold=6.0)
+        db.set_state("rate_limit:x.com", json.dumps(
+            {"hit_count": 5, "cooldown_multiplier": 8.0}
+        ))
+        assert not is_site_paused("x.com", config)

@@ -50,6 +50,7 @@ class RateLimitConfig:
     max_multiplier: float = 8.0
     pause_threshold: float = 6.0
     decay_rate: float = 0.5
+    pause_seconds: int = 900  # max seconds a site stays "paused" since its last hit
 
 
 @dataclass
