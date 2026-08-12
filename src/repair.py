@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import random
 import re
 import subprocess
@@ -82,6 +83,74 @@ def _chunks(seq: list, size: int):
     for i in range(0, len(seq), size):
         yield seq[i : i + size]
 
+
+def _downloaded_paths(stdout: str, nas_path: Path) -> list[Path]:
+    """Parse gallery-dl stdout for file paths under nas_path.
+
+    With piped stdout gallery-dl uses PipeOutput: each downloaded file is a bare
+    absolute-path line; skipped (already-on-disk) files are "# {path}". Both
+    indicate a real file on disk. Anything else on stdout is ignored.
+    """
+    prefix = str(nas_path) + os.sep
+    paths: list[Path] = []
+    for line in stdout.splitlines():
+        line = line.strip()
+        if line.startswith("# "):
+            line = line[2:].strip()
+        if line.startswith(prefix):
+            paths.append(Path(line))
+    return paths
+
+def _relocate_renamed(nas_path: Path, handle: str, downloaded: set[Path]) -> int:
+    """Move files gallery-dl wrote outside the canonical handle dir back into
+    nas/{handle}/{year}/, so reconcile (and the gallery) see them. Returns the
+    number of files moved.
+
+    Files already under the canonical dir are ignored. Name collisions are
+    skipped — the existing canonical file wins and the row will match it.
+    Emptied source dirs are removed; anything else is left in place.
+    """
+    canonical = nas_path / handle
+    by_src: dict[str, list[Path]] = {}
+    for p in downloaded:
+        try:
+            rel = p.relative_to(nas_path)
+        except ValueError:
+            continue
+        if len(rel.parts) < 3 or rel.parts[0] == handle:
+            continue
+        by_src.setdefault(rel.parts[0], []).append(p)
+
+    moved = 0
+    for src_name, paths in by_src.items():
+        src_moved = 0
+        for p in paths:
+            dest = canonical / p.parent.name / p.name
+            if dest.exists():
+                continue
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                p.rename(dest)
+                moved += 1
+                src_moved += 1
+            except OSError:
+                logger.warning("Failed to relocate %s -> %s", p, dest)
+        db.insert_log(
+            "WARNING", "repair",
+            f"{handle}: files landed under renamed author dir '{src_name}'; "
+            f"relocated {src_moved}/{len(paths)} file(s) into canonical dir",
+        )
+        # Remove now-empty year/author dirs; rmdir fails harmlessly if non-empty.
+        for p in paths:
+            try:
+                p.parent.rmdir()
+            except OSError:
+                pass
+        try:
+            (nas_path / src_name).rmdir()
+        except OSError:
+            pass
+    return moved
 
 def repair_missing(
     config: Config, registry: SiteRegistry, max_posts: int | None = None
@@ -187,6 +256,8 @@ def repair_missing(
             # site abort mid-artist never deletes rows we never tried to fetch.
             run_rows: list[MissingRow] = []
             site_aborted = False
+            downloaded: set[Path] = set()
+            had_rc0 = False
             for ci, chunk in enumerate(chunk_list):
                 urls = [u for (u, _, _) in chunk]
                 run_rows.extend(r for (_, _, prows) in chunk for r in prows)
@@ -195,6 +266,9 @@ def repair_missing(
                     proc = _run_batch(urls, config, adapter)
                     dt = time.time() - t0
                     stderr = proc.stderr or ""
+                    chunk_paths = _downloaded_paths(proc.stdout or "", nas_path)
+                    downloaded.update(chunk_paths)
+                    had_rc0 = had_rc0 or proc.returncode == 0
                     if adapter.detect_auth_error(stderr):
                         adapter.mark_auth_invalid()
                         aborted_sites.add(site)
@@ -226,11 +300,18 @@ def repair_missing(
                         )
                         site_aborted = True
                         break
+                    if proc.returncode != 0 and stderr.strip():
+                        tail = "\n".join(stderr.strip().splitlines()[-5:])[:500]
+                        db.insert_log(
+                            "WARNING", "repair",
+                            f"{handle} chunk {ci + 1}/{len(chunk_list)}: rc={proc.returncode}, "
+                            f"stderr tail: {tail}",
+                        )
                     record_success(site, config.rate_limit)
                     db.insert_log(
                         "INFO", "repair",
                         f"{handle} chunk {ci + 1}/{len(chunk_list)}: {len(urls)} post(s) "
-                        f"in {dt:.1f}s (rc={proc.returncode})",
+                        f"in {dt:.1f}s (rc={proc.returncode}, {len(chunk_paths)} file(s) downloaded)",
                     )
                     break
                 if site_aborted:
@@ -245,7 +326,18 @@ def repair_missing(
                     )
                     time.sleep(delay)
 
+            moved = _relocate_renamed(nas_path, handle, downloaded) if downloaded else 0
+            resolved_before = result.rows_recovered + result.rows_updated
             _reconcile_artist(nas_path, handle, run_rows, result)
+            resolved_gained = (result.rows_recovered + result.rows_updated) - resolved_before
+            if resolved_gained == 0 and had_rc0 and run_rows:
+                pid = extract_post_id(run_rows[0].filename) or "?"
+                db.insert_log(
+                    "WARNING", "repair",
+                    f"{handle}: 0 of {len(run_rows)} attempted rows recovered despite "
+                    f"gallery-dl success. Possible author rename. Manual check: "
+                    f"find {nas_path} -name '{pid}_*'",
+                )
     finally:
         db.set_state("repair:running", "0")
 

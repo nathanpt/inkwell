@@ -9,7 +9,12 @@ import pytest
 from src import db
 from src.config_loader import Config, NASConfig
 from src.models import Artist
-from src.repair import RepairResult, extract_post_id, repair_missing
+from src.repair import (
+    RepairResult,
+    _downloaded_paths,
+    extract_post_id,
+    repair_missing,
+)
 from src.sites.base import SiteRegistry
 from src.sites.xcom import XComAdapter
 
@@ -252,3 +257,120 @@ class TestRepairGuard:
 
         assert result.aborted_reason == "already running"
         assert mock_batch.call_count == 0
+
+
+class TestRepairDiagnosticsRename:
+    def test_downloaded_paths_parses_stdout(self, tmp_path):
+        nas = tmp_path / "nas"
+        inside1 = nas / "alice" / "2024" / "111_a.jpg"
+        inside2 = nas / "bob" / "2023" / "222_b.png"
+        outside = tmp_path / "other" / "x.jpg"
+        stdout = "\n".join(
+            ["some log noise", str(inside1), f"# {inside2}", str(outside)]
+        )
+        result = _downloaded_paths(stdout, nas)
+        assert set(result) == {inside1, inside2}
+
+    def test_renamed_dir_relocated_and_recovers(self, setup, monkeypatch):
+        config, registry, nas = setup
+        artist = _make_artist()
+        _insert_file(artist.id, "2024/111_a.jpg", "2024")
+
+        monkeypatch.setattr("src.repair.time.sleep", lambda *_: None)
+
+        def fake_batch(urls, config, adapter):
+            ren_dir = nas / "Renamed" / "2024"
+            ren_dir.mkdir(parents=True, exist_ok=True)
+            lines = []
+            for url in urls:
+                pid = url.rsplit("/", 1)[-1]
+                p = ren_dir / f"{pid}_a.jpg"
+                p.write_bytes(b"data")
+                lines.append(str(p))
+            return subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="\n".join(lines), stderr=""
+            )
+
+        with patch("src.repair._run_batch", side_effect=fake_batch):
+            result = repair_missing(config, registry)
+
+        assert result.rows_recovered == 1
+        assert (nas / "alice" / "2024" / "111_a.jpg").exists()
+        assert not (nas / "Renamed").exists()
+
+    def test_relocate_collision_keeps_existing(self, setup, monkeypatch):
+        config, registry, nas = setup
+        artist = _make_artist()
+        _insert_file(artist.id, "2024/111_a.jpg", "2024")
+
+        monkeypatch.setattr("src.repair.time.sleep", lambda *_: None)
+
+        def fake_batch(urls, config, adapter):
+            # Canonical file already present (e.g. recovered earlier in this
+            # run) — it must win on collision; the renamed-dir duplicate stays.
+            canon = nas / "alice" / "2024" / "111_a.jpg"
+            canon.parent.mkdir(parents=True, exist_ok=True)
+            canon.write_bytes(b"orig")
+            ren_dir = nas / "Renamed" / "2024"
+            ren_dir.mkdir(parents=True, exist_ok=True)
+            dup = ren_dir / "111_a.jpg"
+            dup.write_bytes(b"dup")
+            return subprocess.CompletedProcess(
+                args=[], returncode=0, stdout=str(dup), stderr=""
+            )
+
+        with patch("src.repair._run_batch", side_effect=fake_batch):
+            result = repair_missing(config, registry)
+
+        assert result.rows_recovered == 1
+        assert (nas / "alice" / "2024" / "111_a.jpg").read_bytes() == b"orig"
+        # Renamed-dir duplicate left in place (skip-on-collision).
+        assert (nas / "Renamed" / "2024" / "111_a.jpg").exists()
+
+    def test_unclassified_failure_logs_stderr_tail(self, setup, monkeypatch):
+        config, registry, nas = setup
+        artist = _make_artist()
+        _insert_file(artist.id, "2024/111_a.jpg", "2024")
+
+        monkeypatch.setattr("src.repair.time.sleep", lambda *_: None)
+
+        def fake_batch(urls, config, adapter):
+            return subprocess.CompletedProcess(
+                args=[], returncode=1, stdout="", stderr="Unexpected download error"
+            )
+
+        with patch("src.repair._run_batch", side_effect=fake_batch):
+            result = repair_missing(config, registry)
+
+        assert result.rows_recovered == 0
+        assert len(db.get_all_file_rows()) == 1  # safeguard keeps the row
+        msgs = [
+            lg["message"]
+            for lg in db.get_logs(source="repair")
+            if lg["level"] == "WARNING"
+        ]
+        assert any("stderr tail:" in m for m in msgs)
+
+    def test_zero_recovery_after_success_logs_rename_hint(self, setup, monkeypatch):
+        config, registry, nas = setup
+        artist = _make_artist()
+        _insert_file(artist.id, "2024/111_a.jpg", "2024")
+
+        monkeypatch.setattr("src.repair.time.sleep", lambda *_: None)
+
+        def fake_batch(urls, config, adapter):
+            return subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="", stderr=""
+            )
+
+        with patch("src.repair._run_batch", side_effect=fake_batch):
+            result = repair_missing(config, registry)
+
+        assert result.rows_recovered == 0
+        assert len(db.get_all_file_rows()) == 1  # safeguard keeps the row
+        msgs = [
+            lg["message"]
+            for lg in db.get_logs(source="repair")
+            if lg["level"] == "WARNING"
+        ]
+        assert any("Possible author rename" in m and "find" in m for m in msgs)
