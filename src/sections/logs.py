@@ -38,6 +38,17 @@ def _format_export(
 
 
 def render_logs():
+    # Refresh control sits above the filters so it stays visible even when a
+    # filter yields no rows; a script rerun re-queries the database.
+    _col_spacer, col_refresh = st.columns([5, 1])
+    with col_refresh:
+        if st.button(
+            "Refresh",
+            use_container_width=True,
+            help="Reload log entries from the database.",
+        ):
+            st.rerun()
+
     col1, col2 = st.columns(2)
     with col1:
         level_filter = st.selectbox(
