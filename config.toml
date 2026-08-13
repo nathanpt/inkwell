@@ -10,7 +10,7 @@ stale_threshold_days = 0
 [download]
 retry_attempts = 3
 retry_backoff = [5, 15, 45]
-timeout = 600
+timeout = 1200  # 20 min — cold x.com UserMedia walks exceed 10 min (enum is API-paced)
 inter_artist_cooldown = [30, 60]
 
 [cookies]

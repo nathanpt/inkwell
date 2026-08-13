@@ -67,6 +67,8 @@ def download_artist(
                 progress_cb=lambda fc, tb: db.update_job_progress(job.id, fc, tb),
                 progress_before=before_snapshot,
                 progress_artist_dir=artist_dir,
+                job_id=job.id,
+                artist_id=artist.id,
             )
 
             # Always compute what was actually downloaded
@@ -278,6 +280,8 @@ def _run_gallery_dl(
     progress_cb=None,
     progress_before: dict | None = None,
     progress_artist_dir: Path | None = None,
+    job_id: int | None = None,
+    artist_id: int | None = None,
 ) -> subprocess.CompletedProcess[str]:
     cmd = [
         "gallery-dl",
@@ -318,6 +322,7 @@ def _run_gallery_dl(
                 line = line.rstrip()
                 if line:
                     logger.info("gallery-dl: %s", line)
+                    db.insert_log("INFO", "gallery-dl", line, job_id=job_id, artist_id=artist_id)
                 stderr_lines.append(line)
 
     t_out = _threading.Thread(target=_read_stdout, daemon=True)
@@ -341,16 +346,21 @@ def _run_gallery_dl(
     if progress_cb:
         t_prog.start()
 
+    timed_out = False
     try:
         proc.wait(timeout=config.download.timeout)
     except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait(timeout=5)
+        proc.kill()          # SIGKILL → returncode -9
+        proc.wait(timeout=5) # reap the killed child before raising
+        timed_out = True
     _stop_progress.set()
     t_out.join(timeout=5)
     t_err.join(timeout=5)
     if progress_cb:
         t_prog.join(timeout=5)
+
+    if timed_out:
+        raise subprocess.TimeoutExpired(cmd=cmd, timeout=config.download.timeout)
 
     return subprocess.CompletedProcess(
         args=cmd, returncode=proc.returncode,

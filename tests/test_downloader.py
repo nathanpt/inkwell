@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -124,6 +125,49 @@ class TestDownloadArtist:
             job = download_artist(artist, test_config, test_registry)
 
         assert job.status == "success"
+
+    def test_timeout_logs_timed_out_message(self, db_conn, test_config, test_registry):
+        artist = Artist(handle="slow", site="x.com", source_url="https://x.com/slow")
+        artist.id = db.insert_artist(artist)
+
+        # _run_gallery_dl re-raises TimeoutExpired instead of masking it as code -9
+        with patch(
+            "src.downloader._run_gallery_dl",
+            side_effect=subprocess.TimeoutExpired(
+                cmd="gallery-dl", timeout=test_config.download.timeout
+            ),
+        ):
+            job = download_artist(artist, test_config, test_registry)
+
+        assert job.status == "failed"
+        assert job.error_message == f"gallery-dl timed out after {test_config.download.timeout}s"
+
+    def test_gallery_dl_stderr_mirrored_to_db(self, db_conn, test_config, test_registry):
+        artist = Artist(handle="limited2", site="x.com", source_url="https://x.com/limited2")
+        artist.id = db.insert_artist(artist)
+
+        success_result = MagicMock()
+        success_result.returncode = 0
+        success_result.stderr = ""
+
+        def _mirror_stderr(*args, **kwargs):
+            # Mirror a gallery-dl stderr line to the logs table, as the real
+            # _read_stderr now does, using the job_id/artist_id threaded through.
+            db.insert_log(
+                "INFO", "gallery-dl", "429 Too Many Requests",
+                job_id=kwargs.get("job_id"), artist_id=kwargs.get("artist_id"),
+            )
+            return success_result
+
+        with patch("src.downloader._run_gallery_dl", side_effect=_mirror_stderr):
+            job = download_artist(artist, test_config, test_registry)
+
+        assert job.status == "success"
+        row = db_conn.execute(
+            "SELECT message FROM logs WHERE source='gallery-dl'"
+        ).fetchone()
+        assert row is not None
+        assert row["message"] == "429 Too Many Requests"
 
 
 class TestRateLimitDetection:
