@@ -459,7 +459,53 @@ class TestRepairRateLimitWait:
         assert result.sites_aborted == []
         msgs = [lg["message"] for lg in db.get_logs(source="repair")]
         assert sum("waiting up to" in m for m in msgs) == 1
-        assert sum("backoff 60s (attempt 1/4)" in m for m in msgs) == 1
+        assert sum("backoff 60s (attempt 1/2)" in m for m in msgs) == 1
+
+    def test_between_chunk_stress_wait(self, setup, monkeypatch):
+        import time as _time
+        from src.rate_limiter import RateLimitConfig, record_hit
+        from src.repair import CHUNK_SIZE
+        config, registry, nas = setup
+        config.rate_limit = RateLimitConfig(
+            multiplier_step=8.0, max_multiplier=16.0,
+            pause_threshold=6.0, pause_seconds=120,
+        )
+        artist = _make_artist()
+        # Two chunks' worth of missing rows.
+        for i in range(CHUNK_SIZE * 2):
+            _insert_file(artist.id, f"2024/{i}_a.jpg", "2024")
+
+        # Seed x.com into sustained stress (multiplier 8.0) but with an ANCIENT
+        # last hit, so the artist-entry is_site_paused check (multiplier AND a
+        # recent hit) does not fire, while the between-chunk stress gate
+        # (multiplier alone) does.
+        clock = [100000.0]
+        monkeypatch.setattr(_time, "time", lambda: clock[0])
+        clock[0] = 1000.0
+        record_hit("x.com", config.rate_limit)  # multiplier 8.0, last_hit=1000
+        clock[0] = 100000.0                      # last_hit now ancient -> not paused
+        monkeypatch.setattr(
+            "src.repair.time.sleep", lambda s: clock.__setitem__(0, clock[0] + s)
+        )
+
+        def fake_batch(urls, config, adapter):
+            ydir = nas / "alice" / "2024"
+            ydir.mkdir(parents=True, exist_ok=True)
+            for url in urls:
+                pid = url.rsplit("/", 1)[-1]
+                (ydir / f"{pid}_a.jpg").write_bytes(b"data")
+            return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+        with patch("src.repair._run_batch", side_effect=fake_batch):
+            result = repair_missing(config, registry)
+
+        assert result.rows_recovered == CHUNK_SIZE * 2
+        assert result.sites_aborted == []
+        msgs = [lg["message"] for lg in db.get_logs(source="repair")]
+        # Exactly one between-chunk stress hold (between chunk 1 and 2).
+        assert sum("holding next chunk" in m for m in msgs) == 1
+        # The short cooldown path is skipped while stressed.
+        assert not any(m.startswith("cooldown ") for m in msgs)
 
 
 class TestRepairAuthSkip:

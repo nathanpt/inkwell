@@ -24,11 +24,16 @@ from src.sites.base import SiteAdapter, SiteRegistry
 logger = logging.getLogger(__name__)
 
 POST_ID_RE = re.compile(r"^(\d+)")
-# Smaller bursts land more files before a site's rate window trips; the between-
-# chunk cooldown then paces the next burst. Tunable — the per-chunk logs show the
-# actual landing rate so this can be dialed in.
-CHUNK_SIZE = 10
-MAX_RATE_LIMIT_RETRIES = 3
+# Small bursts keep each chunk within a site's per-window call budget; the
+# between-chunk cooldown (and, under sustained rate-limit stress, a full-window
+# hold — see _wait_for_rate_window) paces the next burst. Tunable; per-chunk
+# logs show the real landing rate. x.com's TweetDetail budget is tight enough
+# that 10-post chunks blew it mid-chunk (2026-08-13); 5 keeps a chunk under it.
+CHUNK_SIZE = 5
+# One retry only: the retry waits out the rate window (see the chunk-retry path),
+# but further blind retries into a hot/escalating window just deepen X's lockout
+# without recovering files. The next scheduled run picks up the remainder.
+MAX_RATE_LIMIT_RETRIES = 1
 
 
 @dataclass
@@ -169,6 +174,26 @@ def _wait_for_unpause(site: str, config: Config) -> None:
     deadline = time.time() + pause_seconds
     while time.time() < deadline and is_site_paused(site, config.rate_limit):
         time.sleep(30)
+
+
+def _wait_for_rate_window(site: str, config: Config) -> None:
+    """Hold for a full upstream rate window before the next chunk when a site is
+    under sustained rate-limit stress (multiplier at/above pause_threshold).
+
+    The normal between-chunk cooldown is far shorter than the upstream window, so
+    without this successive chunks pile into the same spent budget even when each
+    chunk individually succeeds (observed on x.com 2026-08-13: chunk 1 spent the
+    fresh window's TweetDetail budget, chunk 2 immediately 429'd). One chunk per
+    window keeps each burst on a fresh budget; successes decay the multiplier
+    below the threshold and the normal cooldown resumes automatically.
+    """
+    window = config.rate_limit.pause_seconds
+    db.insert_log(
+        "INFO", "repair",
+        f"Site {site} under rate-limit stress; holding next chunk for {window}s "
+        f"to start on a fresh rate window",
+    )
+    time.sleep(window)
 
 
 def repair_missing(
@@ -361,12 +386,18 @@ def repair_missing(
                 # Pace between chunks (not after the last one).
                 if ci < len(chunk_list) - 1:
                     mult = get_cooldown_multiplier(site)
-                    delay = random.uniform(*cooldown) * mult
-                    db.insert_log(
-                        "INFO", "repair",
-                        f"cooldown {delay:.0f}s (multiplier {mult:.1f})",
-                    )
-                    time.sleep(delay)
+                    if mult >= config.rate_limit.pause_threshold:
+                        # Sustained stress: give the next chunk its own fresh
+                        # upstream window instead of the short cooldown, which
+                        # would pile successive chunks into one spent budget.
+                        _wait_for_rate_window(site, config)
+                    else:
+                        delay = random.uniform(*cooldown) * mult
+                        db.insert_log(
+                            "INFO", "repair",
+                            f"cooldown {delay:.0f}s (multiplier {mult:.1f})",
+                        )
+                        time.sleep(delay)
 
             moved = _relocate_renamed(nas_path, handle, downloaded) if downloaded else 0
             resolved_before = result.rows_recovered + result.rows_updated
