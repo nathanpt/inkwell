@@ -147,7 +147,7 @@ pyproject.toml           Dependencies (uv)
 **Harness facts:**
 - **No generators, no `DO NOT EDIT` regions** — all docs are human-maintained and safe to edit.
 - **Config is bind-mounted read-only**; edit on the host and restart the container to apply.
-- Schema is at `PRAGMA user_version = 4`.
+- Schema is at `PRAGMA user_version = 6`.
 
 **Open items and tech debt** live in `PROGRESS.md` (e.g. `docs/DESIGN.md` staleness, CI has no test
 step, a duplicated `RateLimitConfig` across `config_loader.py` and `rate_limiter.py`).

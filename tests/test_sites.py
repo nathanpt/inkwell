@@ -39,12 +39,35 @@ class TestXComAdapter:
     def test_parse_x_com(self):
         handle, url = self.adapter.parse_url("https://x.com/artistname")
         assert handle == "artistname"
-        assert url == "https://x.com/artistname"
+        assert url == "https://x.com/artistname/media?filter=photo"
 
     def test_parse_twitter_normalizes(self):
         handle, url = self.adapter.parse_url("https://twitter.com/artistname")
         assert handle == "artistname"
-        assert url == "https://x.com/artistname"
+        assert url == "https://x.com/artistname/media?filter=photo"
+
+    def test_parse_media_canonical(self):
+        handle, url = self.adapter.parse_url("https://x.com/artistname/media")
+        assert handle == "artistname"
+        assert url == "https://x.com/artistname/media?filter=photo"
+
+    def test_parse_media_filter_photo_idempotent(self):
+        handle, url = self.adapter.parse_url("https://x.com/artistname/media?filter=photo")
+        assert handle == "artistname"
+        assert url == "https://x.com/artistname/media?filter=photo"
+
+    def test_parse_media_foreign_query_replaced(self):
+        handle, url = self.adapter.parse_url("https://x.com/artistname/media?filter=videos")
+        assert url == "https://x.com/artistname/media?filter=photo"
+
+    def test_match_accepts_photo_query_rejects_status_query(self):
+        assert self.adapter.match_url("https://x.com/artistname/media?filter=photo")
+        assert not self.adapter.match_url("https://x.com/artist/status/123?foo=bar")
+
+    def test_parse_non_media_tab_preserved(self):
+        handle, url = self.adapter.parse_url("https://x.com/artistname/with_replies")
+        assert handle == "artistname"
+        assert url == "https://x.com/artistname/with_replies"
 
     def test_parse_rejects_invalid(self):
         with pytest.raises(ValueError):

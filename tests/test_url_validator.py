@@ -9,13 +9,13 @@ class TestValidateUrl:
     def test_valid_x_com(self):
         handle, url, adapter = validate_url("https://x.com/artistname")
         assert handle == "artistname"
-        assert url == "https://x.com/artistname"
+        assert url == "https://x.com/artistname/media?filter=photo"
         assert adapter.name == "x.com"
 
     def test_valid_twitter_com(self):
         handle, url, adapter = validate_url("https://twitter.com/artistname")
         assert handle == "artistname"
-        assert url == "https://x.com/artistname"
+        assert url == "https://x.com/artistname/media?filter=photo"
         assert adapter.name == "x.com"
 
     def test_trailing_slash(self):

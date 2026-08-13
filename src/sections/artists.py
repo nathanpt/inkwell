@@ -53,7 +53,7 @@ def render_artists():
         with col_input:
             url = st.text_input(
                 "Artist URL",
-                placeholder="https://x.com/handle, https://www.pixiv.net/users/123, https://www.deviantart.com/name",
+                placeholder="https://x.com/handle/media?filter=photo, https://www.pixiv.net/users/123, https://www.deviantart.com/name",
             )
         with col_btn:
             submitted = st.form_submit_button("Add Artist", use_container_width=True)

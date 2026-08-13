@@ -7,7 +7,8 @@ from src.models import Artist
 from src.sites.base import SiteAdapter
 
 X_COM_PATTERN = re.compile(
-    r"^https?://(x\.com|twitter\.com)/([a-zA-Z0-9_]{1,15})(?:/(media|with_replies|tweets|highlights|likes))?/?$"
+    r"^https?://(x\.com|twitter\.com)/([a-zA-Z0-9_]{1,15})"
+    r"(?:/(media|with_replies|tweets|highlights|likes))?/?(?:\?[^#]*)?$"
 )
 
 CONFIG_PATH = Path("/app/config/gallery-dl.xcom.conf")
@@ -34,10 +35,10 @@ class XComAdapter(SiteAdapter):
             )
         handle = match.group(2)
         tab = match.group(3)
-        if tab:
+        if tab and tab != "media":
             normalized_url = f"https://x.com/{handle}/{tab}"
         else:
-            normalized_url = f"https://x.com/{handle}"
+            normalized_url = f"https://x.com/{handle}/media?filter=photo"
         return handle, normalized_url
 
     def get_gallery_dl_config_path(self) -> Path:

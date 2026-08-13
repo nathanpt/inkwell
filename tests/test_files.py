@@ -360,7 +360,7 @@ class TestSchemaMigration:
         assert tables is not None
 
         version = db_conn.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 5
+        assert version == 6
 
     def test_v3_to_v4_migration(self, tmp_path):
         """An existing v3 DB gets the downloaded_at index and bumps to v4."""
@@ -390,7 +390,7 @@ class TestSchemaMigration:
         db.init_schema(conn)
 
         version = conn.execute("PRAGMA user_version").fetchone()[0]
-        assert version == 5
+        assert version == 6
         idx = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_files_downloaded'"
         ).fetchone()
@@ -442,7 +442,7 @@ class TestSchemaMigration:
 
         db.init_schema(conn)
 
-        assert conn.execute("PRAGMA user_version").fetchone()[0] == 5
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 6
         idx = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='index' AND name='idx_files_artist_filename'"
         ).fetchone()

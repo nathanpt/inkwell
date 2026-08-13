@@ -9,7 +9,7 @@ from src.models import Artist, Job
 
 DEFAULT_DB_PATH = Path("/app/data/inkwell.db")
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS artists (
@@ -136,6 +136,19 @@ def init_schema(conn: sqlite3.Connection) -> None:
                 ON files(artist_id, filename);
         """)
         conn.execute("PRAGMA user_version = 5")
+        conn.commit()
+    if current_version < 6:
+        # Canonicalize x.com artist URLs to the photo-filtered media tab. Only the
+        # two shapes the old normalizer could have stored exist; other tabs and
+        # already-canonical rows are untouched. Injective, so UNIQUE can't collide.
+        conn.executescript("""
+            UPDATE artists
+               SET source_url = 'https://x.com/' || handle || '/media?filter=photo'
+             WHERE site = 'x.com'
+               AND source_url IN ('https://x.com/' || handle,
+                                  'https://x.com/' || handle || '/media');
+        """)
+        conn.execute("PRAGMA user_version = 6")
         conn.commit()
 
 
