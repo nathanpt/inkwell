@@ -87,7 +87,7 @@ pyproject.toml           Dependencies (uv)
   snapshots the artist dir before/after `gallery-dl` to derive `file_count`/`total_bytes`; records
   a success (decaying the rate-limit multiplier) or a rate/auth failure; triggers auto-zip on
   success. `download_all` / `download_stale` are the two entry points; both skip artists whose
-  site auth is flagged invalid before creating a job.
+  site auth is flagged invalid before creating a job. A `gallery-dl` timeout re-raises (logged as `timed out after Ns`) instead of a masked exit code, and every non-empty stderr line is persisted to the `logs` table (`source='gallery-dl'`).
 - **Integrity + repair pipeline:** `src/integrity.py` reports missing files (DB rows with no loose
   file, accounting for sibling zips); `src/repair.py::repair_missing` re-fetches them in chunks via
   per-post gallery-dl URLs, then `_reconcile_artist` matches landed files back to rows (exact
@@ -109,7 +109,7 @@ pyproject.toml           Dependencies (uv)
 
 - **`gallery-dl` subprocess:** the CLI contract (config path, `--dest`, `--cookies`,
   `--write-archive`, per-post URLs) is the integration surface; stdout (`PipeOutput`: bare path per
-  file, `# {path}` per skip) is parsed by repair.
+  file, `# {path}` per skip) is parsed by repair; **stderr** is mirrored line-by-line to the `logs` table (`source='gallery-dl'`) during downloads.
 - **NAS:** bind-mounted at `/nas/inkwell` (host NFS, mounted `soft,intr`); media only — never the DB.
 - **SQLite WAL:** `inkwell.db` lives in the local `inkwell-data` named volume (POSIX locking); it
   must **not** sit on NFS.

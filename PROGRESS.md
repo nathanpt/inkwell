@@ -1,7 +1,7 @@
 # Project Progress
 
-**Last assessed:** 2026-08-12
-**Repository state:** branch `main` · local-only commits ahead of `origin/main` (`9dc7f00`); latest adds up-front auth-invalid site skips (repair + downloads), x.com pacing (`sleep-request` + cooldown), chunk-retry rate-window waits, and `scripts/analyze_rate_limits.py`. No-push policy in `AGENTS.md`.
+**Last assessed:** 2026-08-13
+**Repository state:** branch `main` · `origin/main` at `9e3da2c`; HEAD (`c970c0f`) is the sole local-only commit — download timeout diagnostics (see "Active work"). No-push policy in `AGENTS.md`.
 
 ## Canonical sources
 
@@ -17,10 +17,10 @@
 
 ## Confirmed working surfaces
 
-- **Tests:** `.venv/bin/python -m pytest tests/ -q` → **202 passed** (observed 2026-08-13, ~1.6s). Local venv runs Python 3.14.4; production image is `python:3.12-slim` (Dockerfile).
+- **Tests:** `.venv/bin/python -m pytest tests/ -q` → **204 passed** (observed 2026-08-13, ~1.6s). Local venv runs Python 3.14.4; production image is `python:3.12-slim` (Dockerfile).
 - **Entry point:** `streamlit run src/app.py` (compose `CMD`). `main()` → `bootstrap()` → scheduler setup → dashboard render. See `src/app.py`.
 - **Schema:** SQLite, `PRAGMA user_version = 6`. Migrations: v2→v3 added the `files` table; v3→v4 added `idx_files_downloaded`; v4→v5 deduped `(artist_id, filename)` rows and enforced uniqueness; v5→v6 canonicalized x.com artist `source_url`s to `…/media?filter=photo`. See `src/db.py`, `src/bootstrap.py`.
-- **Download engine:** `gallery-dl` invoked as subprocess from `src/downloader.py`; one artist at a time, per-artist job lock, directory-diff metrics.
+- **Download engine:** `gallery-dl` invoked as subprocess from `src/downloader.py`; one artist at a time, per-artist job lock, directory-diff metrics. gallery-dl stderr is mirrored to the `logs` table (`source='gallery-dl'`), and a download timeout re-raises as a failed job (`timed out after Ns`, not a masked exit code).
 - **Multi-site:** adapters in `src/sites/` (`base.py`, `xcom.py`, `pixiv.py`, `deviantart.py`) with per-site gallery-dl configs `gallery-dl.{xcom,pixiv,deviantart}.conf`.
 - **Gallery tab:** `src/sections/gallery.py` + `src/gallery_media.py`. Grid is sorted post-chronologically by the numeric post ID in the filename basename (X snowflake / Pixiv illust id / DeviantArt deviation id), asc/desc driven in SQL via `db.get_recent_files(order=...)`.
 - **Auto-zip:** `src/zipper.py`, triggered post-job and retroactively from Settings.
@@ -31,12 +31,8 @@
 
 ## Active work
 
-- **Rate-limit wait fix** (`063eccf`, local-only): repair now waits for the rate window to clear instead of skipping all of a paused site's artists; the pause is time-bounded so previously-stuck sites self-unblock on next deploy.
-- **Auth skip + x.com pacing + offline analyzer** (local-only): repair (`repair_missing`) and the download drivers (`download_all`/`download_stale`) now skip sites whose auth is flagged invalid (`auth_valid:<site> == "0"`) before any fetch/job — one WARNING per site instead of a failing run. x.com pacing raised: `gallery-dl.xcom.conf` gains `sleep-request: 6` and `[sites.xcom] cooldown` → `[60, 120]` (repair between-chunk only; downloads rely on request-level spacing). A chunk that 429s now waits out the rate window via `_wait_for_unpause` before its retry. New `scripts/analyze_rate_limits.py` is a stdlib-only, read-only offline analyzer over a copied DB (per-day 429 hits/aborts/pause-waits/chunk throughput, limiter state, repair-run summaries). Full suite green at 195.
-- **x.com repair call-budget tightening** (local-only; follow-up to the above after reading 2026-08-13 logs): x.com's per-window TweetDetail budget is too small for 10-post chunks — chunk 1 spent the fresh window, chunk 2 immediately 429'd, and 900s-window retries kept failing (an upstream call ceiling, not a pacing burst). Repair now uses `CHUNK_SIZE = 5`, `MAX_RATE_LIMIT_RETRIES = 1` (stop hammering into an escalating lockout; the next scheduled run resumes), and holds the next chunk for a full rate window via `_wait_for_rate_window` when the multiplier is at/above `pause_threshold`, so successive chunks each land on a fresh budget.
-- **Repair diagnostics + rename-author recovery** (`ff218cb`) and **Export Logs button** (`9dc7f00`): on `main`; `ff218cb` + `063eccf` are local-only (`origin/main` lags at `9dc7f00`). Remaining unverified surface is the Streamlit UI itself — the app can't boot in this dev env (loads container config paths), so the Export Logs button, per-chunk repair logs, rename WARNING, and rate-limit-wait behavior must be confirmed on the production container.
-- Gallery post-chronological sort (`6d232c3`) shipped earlier; its UI manual smoke is still unverified on the production container.
-- **x.com media-tab photo-filter canonicalization** (local-only): X.com's media tab (`/{handle}/media`) now defaults to a videos view server-side; the photos view lives at `/{handle}/media?filter=photo`. `XComAdapter` now accepts an optional trailing slash + query string and canonicalizes every x.com submission (bare profile, `/media`, or any media-tab query) to `https://x.com/{handle}/media?filter=photo`; `/status/…` URLs stay rejected and non-media tabs (`/with_replies`, `/tweets`, `/highlights`, `/likes`) keep their form. A v5→v6 migration rewrites existing stored rows (bare and `/media` shapes only — injective, no UNIQUE collision) to the same canonical URL. `gallery-dl.xcom.conf` is deliberately untouched: gallery-dl ignores the query and still dispatches `TwitterMediaExtractor` (verified on installed 1.32.1). Full suite green (202 passed). **Production follow-up (hand to operator):** confirm `user_version = 6` and every x.com row is `…/media?filter=photo`, then run the photo probe (`gallery-dl -g …/media?filter=photo` on one tracked artist) to confirm `pbs.twimg.com` image URLs still flow from `UserMedia`.
+- **Download timeout diagnostics** (`c970c0f`, local-only): production downloads of large/cold x.com timelines hit Inkwell's gallery-dl timeout and died as the opaque `exited with code -9` with no stderr visibility. `_run_gallery_dl` (`src/downloader.py`) now re-raises `subprocess.TimeoutExpired` after kill+reap — previously it caught the timeout, SIGKILLed the process (returncode `-9`), and returned a `CompletedProcess`, leaving `download_artist`'s timeout branch dead and the job logging `gallery-dl exited with code -9`. Jobs now log `gallery-dl timed out after Ns`. gallery-dl stderr is mirrored to the `logs` table (`source='gallery-dl'`, `INFO`, tagged with `job_id`/`artist_id`) so the Logs tab / Export Logs surface the real 429s during a run. `[download] timeout` raised 600 → 1200s so cold `UserMedia` walks (API-paced enumeration, not skipped by `archive.db`) finish in one pass. Full suite **204 passed** (two new downloader tests).
+- **Previously local-only work has shipped to `origin/main` (`9e3da2c`):** the rate-limit-wait fix (`063eccf`), up-front auth-invalid site skips + x.com pacing + the offline analyzer (`e412a9d`), the x.com repair call-budget tightening (`fb7db18`), jittered (humanlike) download pacing for all providers (`eddc20e`), x.com URL canonicalization to `media?filter=photo` (`36ab655`), and the Logs refresh button (`9e3da2c`). Their UI smoke (Export Logs, per-chunk repair logs, rename WARNING, rate-limit-wait, gallery sort) is still pending verification on the production container — the app can't boot in this dev env.
 
 ## Open tasks and technical debt
 
@@ -51,14 +47,14 @@ Each item is sourced; none is invented.
 - [ ] **No lint/typecheck configured.** Source: `pyproject.toml` defines no `ruff`/`mypy`/formatter config. Not blocking, but unverified.
 - [ ] **`docs/DEV_GUIDE.md` is a near-empty stub** (dev-server + test command only). Source: 345-byte file.
 - [ ] **`.factory/` is an empty vestigial directory.** Source: `ls .factory` (no contents).
-- [ ] **Logs source-filter dropdown is incomplete.** Source: `src/sections/logs.py:51` — options are `["All", "downloader", "scheduler", "bootstrap"]`, omitting `repair` (and integrity). Repair logs only surface when Source = "All", which limits the new Export Logs button for repair debugging.
+- [ ] **Logs source-filter dropdown is incomplete.** Source: `src/sections/logs.py:62` — options are `["All", "downloader", "scheduler", "bootstrap"]`, omitting `repair`, `gallery-dl`, and integrity. Repair and gallery-dl (mirrored stderr) logs only surface when Source = "All", which limits the Export Logs button for debugging.
 - [ ] **Duplicated `RateLimitConfig`.** Source: `src/config_loader.py:48` and `src/rate_limiter.py:14` each define `RateLimitConfig`; `Config.rate_limit` uses the `config_loader` one while the limiter functions access it duck-typed. They must be kept in sync — adding `pause_seconds` to only one broke a downloader test this session. Collapse to a single definition.
 - [ ] **`README.md` config schema is stale.** Source: `README.md:95-99` — the `[rate_limit]` example omits `pause_seconds` (added this session); the onboarding config block otherwise lags `config.toml`.
 - [ ] **`archive.db` re-emits already-recorded files (wasted re-downloads).** Source: the `files`-table dedup work (v5 migration + upsert) was triggered by duplicate rows where gallery-dl re-downloaded a file that was already on disk. The dedup collapses the duplicate rows and prevents new ones, but does NOT address the root cause: gallery-dl's `archive.db` (fully owned by gallery-dl; Inkwell never reads/writes it) has a gap that causes the re-emission in the first place. Each re-emission re-downloads bytes that already landed. Investigate the `archive.db` gap (e.g. post-id / post-date filename contract vs. archive key, or a zip-vs-loose path mismatch) as a separate decision; out of scope for the dedup work.
 
 ## Verification status
 
-- **Passing:** `pytest` — 196 passed (full suite, observed this assessment).
+- **Passing:** `pytest` — 204 passed (full suite, observed this assessment).
 - **Not verified in CI:** tests are not part of `build.yml`; a regression can ship to `main` green-image but red-tests.
 - **Not run this assessment:** the Streamlit app itself (not launched here), Docker build, gallery-dl subprocess (requires credentials + NAS).
 
