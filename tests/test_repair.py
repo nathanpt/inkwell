@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from src import db
-from src.config_loader import Config, NASConfig
+from src.config_loader import Config, NASConfig, RepairConfig, load_config
 from src.models import Artist
 from src.repair import (
     RepairResult,
@@ -832,3 +832,207 @@ class TestProgressiveReconciliation:
         assert summary["by_artist"] == {str(artist.id): 1}
         # Reconcile never ran: no row deletions despite the crash.
         assert len(db.get_all_file_rows()) == 6
+
+
+class TestTimelineRewalk:
+    """Badly-decayed artists (>=50 missing and >=25% of their rows) repair via
+    one timeline re-walk instead of per-post TweetDetail fetches."""
+
+    def _seed_decayed(self, nas, artist):
+        """60 rows: 55 missing (pids 1000..), 5 present on disk (pids 3000..)."""
+        ydir = nas / artist.handle / "2024"
+        ydir.mkdir(parents=True)
+        for pid in range(1000, 1055):
+            _insert_file(artist.id, f"2024/{pid}_a.jpg", "2024")
+        for pid in range(3000, 3005):
+            _insert_file(artist.id, f"2024/{pid}_a.jpg", "2024")
+            (ydir / f"{pid}_a.jpg").write_bytes(b"data")
+
+    def test_decay_triggers_rewalk(self, setup, monkeypatch):
+        config, registry, nas = setup
+        artist = _make_artist()
+        self._seed_decayed(nas, artist)
+
+        monkeypatch.setattr("src.repair.time.sleep", lambda *_: None)
+        calls = []
+
+        def fake_batch(urls, config, adapter):
+            calls.append(list(urls))
+            if any("/status/" not in u for u in urls):  # timeline URL
+                ydir = nas / "alice" / "2024"
+                for pid in range(1000, 1055):
+                    (ydir / f"{pid}_a.jpg").write_bytes(b"data")
+            return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+        with patch("src.repair._run_batch", side_effect=fake_batch) as mock_batch:
+            result = repair_missing(config, registry)
+
+        assert mock_batch.call_count == 1
+        assert calls[0] == [artist.source_url]
+        assert result.rows_recovered == 55
+        assert len(db.get_all_file_rows()) == 60
+        msgs = [lg["message"] for lg in db.get_logs(source="repair")]
+        assert any("timeline re-walk" in m for m in msgs)
+
+    def test_small_artist_stays_per_post(self, setup, monkeypatch):
+        config, registry, nas = setup
+        artist = _make_artist()
+        for pid in ("111", "222", "333"):  # 100% missing but only 3 rows
+            _insert_file(artist.id, f"2024/{pid}_a.jpg", "2024")
+
+        monkeypatch.setattr("src.repair.time.sleep", lambda *_: None)
+        seen_urls = []
+
+        def fake_batch(urls, config, adapter):
+            seen_urls.extend(urls)
+            ydir = nas / "alice" / "2024"
+            ydir.mkdir(parents=True, exist_ok=True)
+            for url in urls:
+                pid = url.rsplit("/", 1)[-1]
+                (ydir / f"{pid}_a.jpg").write_bytes(b"data")
+            return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+        with patch("src.repair._run_batch", side_effect=fake_batch):
+            result = repair_missing(config, registry)
+
+        assert seen_urls and all("/status/" in u for u in seen_urls)
+        assert result.rows_recovered == 3
+
+    def test_rewalk_failure_falls_back(self, setup, monkeypatch):
+        config, registry, nas = setup
+        artist = _make_artist()
+        self._seed_decayed(nas, artist)
+
+        monkeypatch.setattr("src.repair.time.sleep", lambda *_: None)
+        seen_urls = []
+
+        def fake_batch(urls, config, adapter):
+            seen_urls.extend(urls)
+            if any("/status/" not in u for u in urls):  # re-walk hits 429
+                return subprocess.CompletedProcess(
+                    args=[], returncode=1, stdout="",
+                    stderr="[error][twitter] 429 Too Many Requests",
+                )
+            ydir = nas / "alice" / "2024"
+            for url in urls:
+                pid = url.rsplit("/", 1)[-1]
+                (ydir / f"{pid}_a.jpg").write_bytes(b"data")
+            return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+        with patch("src.repair._run_batch", side_effect=fake_batch):
+            result = repair_missing(config, registry)
+
+        assert any("/status/" not in u for u in seen_urls)  # re-walk was tried
+        assert any("/status/" in u for u in seen_urls)      # per-post fallback ran
+        assert result.rows_recovered == 55
+        msgs = [lg["message"] for lg in db.get_logs(source="repair")]
+        assert any("falling back to per-post" in m for m in msgs)
+
+    def test_rewalk_consumes_scheduled_budget(self, setup, monkeypatch):
+        config, registry, nas = setup
+        alice = _make_artist(handle="alice")
+        bob = _make_artist(handle="bob")
+        for artist in (alice, bob):
+            self._seed_decayed(nas, artist)
+
+        monkeypatch.setattr("src.repair.time.sleep", lambda *_: None)
+        calls = []
+
+        def fake_batch(urls, config, adapter):
+            calls.append(list(urls))
+            for url in urls:
+                if "/status/" not in url:  # timeline URL: land that artist's files
+                    handle = url.rsplit("/", 1)[-1]
+                    ydir = nas / handle / "2024"
+                    for pid in range(1000, 1055):
+                        (ydir / f"{pid}_a.jpg").write_bytes(b"data")
+            return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+        with patch("src.repair._run_batch", side_effect=fake_batch) as mock_batch:
+            result = repair_missing(config, registry, max_posts=200)
+
+        assert mock_batch.call_count == 1  # only alice's re-walk; budget spent
+        assert calls[0] == [alice.source_url]
+        assert result.posts_attempted == 200
+        assert len(db.get_all_file_rows()) == 120  # bob's rows untouched
+
+    def test_rewalk_timeout_falls_back(self, setup, monkeypatch):
+        config, registry, nas = setup
+        artist = _make_artist()
+        self._seed_decayed(nas, artist)
+
+        monkeypatch.setattr("src.repair.time.sleep", lambda *_: None)
+
+        def fake_run(cmd, **kwargs):
+            urls = [a for a in cmd if a.startswith("https://")]
+            if any("/status/" not in u for u in urls):  # re-walk hits the timeout
+                raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout", 0))
+            ydir = nas / "alice" / "2024"
+            for u in urls:
+                pid = u.rsplit("/", 1)[-1]
+                (ydir / f"{pid}_a.jpg").write_bytes(b"data")
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        with patch("src.repair.subprocess.run", side_effect=fake_run):
+            result = repair_missing(config, registry)
+
+        # Timeout kill became an rc!=0 batch -> per-post fallback recovered all
+        assert result.rows_recovered == 55
+        msgs = [lg["message"] for lg in db.get_logs(source="repair")]
+        assert any("falling back to per-post" in m for m in msgs)
+
+    def test_duplicate_handle_rewalk_scopes_to_first_artist(self, setup, monkeypatch):
+        config, registry, nas = setup
+        main = Artist(handle="alice", site="x.com", source_url="https://x.com/alice")
+        main.id = db.insert_artist(main)
+        tabs = Artist(handle="alice", site="x.com", source_url="https://x.com/alice/likes")
+        tabs.id = db.insert_artist(tabs)
+        self._seed_decayed(nas, main)
+        for pid in ("5000", "5001"):  # second artist row, same handle
+            _insert_file(tabs.id, f"2024/{pid}_a.jpg", "2024")
+
+        monkeypatch.setattr("src.repair.time.sleep", lambda *_: None)
+        calls = []
+
+        def fake_batch(urls, config, adapter):
+            calls.append(list(urls))
+            if any("/status/" not in u for u in urls):  # re-walk main's timeline only
+                ydir = nas / "alice" / "2024"
+                for pid in range(1000, 1055):
+                    (ydir / f"{pid}_a.jpg").write_bytes(b"data")
+            return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+        with patch("src.repair._run_batch", side_effect=fake_batch) as mock_batch:
+            result = repair_missing(config, registry)
+
+        assert mock_batch.call_count == 1
+        assert calls[0] == [main.source_url]
+        assert result.rows_recovered == 55
+        # The never-walked artist's rows survive: reconcile only saw main's rows
+        filenames = {r["filename"] for r in db.get_all_file_rows()}
+        assert len(filenames) == 62
+        assert {"2024/5000_a.jpg", "2024/5001_a.jpg"} <= filenames
+
+
+class TestRepairTimeout:
+    def test_repair_timeout_config_and_use(self, setup, monkeypatch, tmp_path):
+        cfg_file = tmp_path / "config.toml"
+        cfg_file.write_text('[nas]\nmount_path = "/nas/inkwell"\n\n[repair]\ntimeout = 123\n')
+        assert load_config(cfg_file).repair.timeout == 123
+        assert RepairConfig().timeout == 5400
+
+        config, registry, nas = setup
+        config.repair = RepairConfig(timeout=123)
+        artist = _make_artist()
+        _insert_file(artist.id, "2024/111_a.jpg", "2024")
+
+        monkeypatch.setattr("src.repair.time.sleep", lambda *_: None)
+        with patch(
+            "src.repair.subprocess.run",
+            return_value=subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="", stderr=""
+            ),
+        ) as mock_run:
+            repair_missing(config, registry)
+
+        assert mock_run.call_args.kwargs["timeout"] == 123

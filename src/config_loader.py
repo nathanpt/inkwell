@@ -73,6 +73,13 @@ class IntegrityConfig:
     auto_repair: bool = True
     max_posts_per_run: int = 200    # cap for scheduled auto-repair; manual UI repair is uncapped
 
+
+@dataclass
+class RepairConfig:
+    timeout: int = 5400  # one repair gallery-dl invocation (chunk or timeline re-walk);
+                         # x.com rate-limit waits sleep INSIDE gallery-dl (~15 min each)
+
+
 @dataclass
 class Config:
     nas: NASConfig = field(default_factory=NASConfig)
@@ -84,6 +91,7 @@ class Config:
     rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
     zip: ZipConfig = field(default_factory=ZipConfig)
     integrity: IntegrityConfig = field(default_factory=IntegrityConfig)
+    repair: RepairConfig = field(default_factory=RepairConfig)
     sites: dict[str, SiteConfig] = field(default_factory=dict)
 
 
@@ -101,6 +109,7 @@ def load_config(path: Path = DEFAULT_CONFIG_PATH) -> Config:
         auth=AuthConfig(**raw.get("auth", {})),
         retention=RetentionConfig(**raw.get("retention", {})),
         integrity=IntegrityConfig(**raw.get("integrity", {})),
+        repair=RepairConfig(**raw.get("repair", {})),
         zip=ZipConfig(**raw.get("zip", {})),
         sites=sites,
     )

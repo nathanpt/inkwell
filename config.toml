@@ -10,7 +10,7 @@ stale_threshold_days = 0
 [download]
 retry_attempts = 3
 retry_backoff = [5, 15, 45]
-timeout = 1200  # 20 min — cold x.com UserMedia walks exceed 10 min (enum is API-paced)
+timeout = 3600  # 60 min — x.com walks are sleep-request paced (15-30s/request); 1200s only fit the old 4-10s spacing
 inter_artist_cooldown = [30, 60]
 
 [cookies]
@@ -35,7 +35,7 @@ on_job_complete = true
 compression_level = 6
 
 [sites.xcom]
-cooldown = [60, 120]
+cooldown = [90, 180]
 
 [sites.pixiv]
 cooldown = [5, 15]
@@ -48,3 +48,6 @@ enabled = true             # Scheduled integrity check
 check_cron = "0 4 * * 0"   # Weekly Sunday 04:00
 auto_repair = true         # Attempt re-download of missing files after check
 max_posts_per_run = 200    # Cap per scheduled repair run (manual repair is uncapped)
+
+[repair]
+timeout = 5400  # one gallery-dl invocation (per-post chunk or timeline re-walk)

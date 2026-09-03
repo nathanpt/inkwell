@@ -206,6 +206,12 @@ def get_artist_by_url(source_url: str) -> Artist | None:
         return _row_to_artist(row) if row else None
 
 
+def get_artist_by_id(artist_id: int) -> Artist | None:
+    with _connect() as conn:
+        row = conn.execute("SELECT * FROM artists WHERE id = ?", (artist_id,)).fetchone()
+        return _row_to_artist(row) if row else None
+
+
 def deactivate_artist(artist_id: int) -> None:
     with _connect() as conn:
         conn.execute("UPDATE artists SET is_active = 0 WHERE id = ?", (artist_id,))

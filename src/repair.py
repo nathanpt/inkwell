@@ -33,6 +33,12 @@ POST_ID_RE = re.compile(r"^(\d+)")
 # logs show the real landing rate. x.com's TweetDetail budget is tight enough
 # that 10-post chunks blew it mid-chunk (2026-08-13); 5 keeps a chunk under it.
 CHUNK_SIZE = 5
+# A badly-decayed artist is cheaper to repair with one timeline re-walk
+# (~1 API call per ~20 tweets) than per-post TweetDetail fetches (1 per
+# tweet). Below these floors per-post stays cheaper and keeps per-URL 404
+# evidence for upstream-removed purges.
+REWALK_MIN_MISSING = 50
+REWALK_MISSING_FRACTION = 0.25
 # One retry only: the retry waits out the rate window (see the chunk-retry path),
 # but further blind retries into a hot/escalating window just deepen X's lockout
 # without recovering files. The next scheduled run picks up the remainder.
@@ -108,9 +114,20 @@ def _run_batch(
     cmd.extend(urls)
 
     logger.info("Repair batch (%d URL(s)): %s", len(urls), " ".join(cmd))
-    return subprocess.run(
-        cmd, capture_output=True, text=True, timeout=config.download.timeout
-    )
+    try:
+        return subprocess.run(
+            cmd, capture_output=True, text=True, timeout=config.repair.timeout
+        )
+    except subprocess.TimeoutExpired:
+        # A rate-limit-strained x.com invocation can legally spend over an
+        # hour sleeping INSIDE gallery-dl; convert the kill into an rc!=0
+        # result so callers (re-walk fallback, chunk retry) treat it like any
+        # failed batch instead of the raise aborting the whole run.
+        logger.warning("Repair batch timed out after %ss", config.repair.timeout)
+        return subprocess.CompletedProcess(
+            cmd, returncode=124, stdout="",
+            stderr=f"[inkwell] gallery-dl timed out after {config.repair.timeout}s",
+        )
 
 
 def _chunks(seq: list, size: int):
@@ -225,6 +242,24 @@ def _wait_for_rate_window(site: str, config: Config) -> None:
     time.sleep(window)
 
 
+def _abort_site_auth(
+    site: str,
+    adapter: SiteAdapter,
+    result: RepairResult,
+    aborted_sites: set[str],
+    detail: str,
+) -> None:
+    """Flag a site's auth as invalid and skip it for the rest of the run
+    (shared by the timeline re-walk and per-post chunk paths)."""
+    adapter.mark_auth_invalid()
+    aborted_sites.add(site)
+    result.sites_aborted.append(site)
+    db.insert_log(
+        "ERROR", "repair",
+        f"{site}: auth error on {detail}; marking auth invalid, skipping site",
+    )
+
+
 def _patch_stored_summary(recovered: list[MissingRow]) -> None:
     """Fold rows already recovered this run into the stored integrity summary.
 
@@ -310,6 +345,9 @@ def repair_missing(
 
         nas_path = Path(config.nas.mount_path)
         aborted_sites: set[str] = set()
+        # Decay fractions for the re-walk decision below need each artist's
+        # total row count; missing rows alone cannot express "25% of artist".
+        disk_usage = db.get_disk_usage_by_artist()
 
         # Sites whose auth is already flagged invalid: skip all their artists up
         # front instead of discovering the dead session on the first chunk.
@@ -348,41 +386,24 @@ def repair_missing(
                     )
                     continue
 
-            # Partition rows by post id; drop non-numeric as unsupported.
-            by_pid: dict[str, list[MissingRow]] = {}
-            unsupported_here = 0
-            for r in rows:
-                pid = extract_post_id(r.filename)
-                if pid is None:
-                    unsupported_here += 1
-                    continue
-                by_pid.setdefault(pid, []).append(r)
-            if unsupported_here:
-                result.rows_unsupported += unsupported_here
-
-            # Build the URL list, honouring the global post cap.
-            attempted: list[tuple[str, str, list[MissingRow]]] = []  # (url, pid, rows)
-            for pid, prows in by_pid.items():
-                if max_posts is not None and result.posts_attempted >= max_posts:
-                    break
-                url = adapter.build_post_url(handle, pid)
-                if url is None:
-                    result.rows_unsupported += len(prows)
-                    continue
-                attempted.append((url, pid, prows))
-                result.posts_attempted += 1
-
-            if not attempted:
-                continue
-
-            db.insert_log(
-                "INFO", "repair",
-                f"{handle} ({site}): {len(rows)} row(s), {len(attempted)} post(s) to fetch"
-                + (f", {unsupported_here} unsupported" if unsupported_here else ""),
+            # A badly-decayed artist is cheaper to repair with one timeline
+            # re-walk (~1 API call per ~20 tweets via the artist's own page)
+            # than per-post TweetDetail fetches (1 call per tweet); gallery-
+            # dl's on-disk skip means only the absent files actually download.
+            # A (site, handle) group can span artist rows (e.g. both /alice
+            # and /alice/likes added as separate artists); the re-walk covers
+            # only the first artist's rows — the rest are never marked
+            # attempted, so the reconcile safeguard keeps them for a later run.
+            artist_rows = [r for r in rows if r.artist_id == rows[0].artist_id]
+            artist_rec = db.get_artist_by_id(rows[0].artist_id)
+            total = disk_usage.get(rows[0].artist_id, (len(artist_rows), 0))[0]
+            rewalked = (
+                artist_rec is not None
+                and len(artist_rows) >= REWALK_MIN_MISSING
+                and total > 0
+                and len(artist_rows) / total >= REWALK_MISSING_FRACTION
+                and (max_posts is None or result.posts_attempted < max_posts)
             )
-
-            cooldown = config.sites.get(site, SiteConfig()).cooldown
-            chunk_list = list(_chunks(attempted, CHUNK_SIZE))
             # Only rows whose chunk actually executed reach reconciliation, so a
             # site abort mid-artist never deletes rows we never tried to fetch.
             run_rows: list[MissingRow] = []
@@ -390,93 +411,177 @@ def repair_missing(
             downloaded: set[Path] = set()
             had_rc0 = False
             dead_pids: set[str] = set()  # pids gallery-dl positively reported gone
-            for ci, chunk in enumerate(chunk_list):
-                urls = [u for (u, _, _) in chunk]
-                run_rows.extend(r for (_, _, prows) in chunk for r in prows)
-                for attempt in range(MAX_RATE_LIMIT_RETRIES + 1):
-                    t0 = time.time()
-                    proc = _run_batch(urls, config, adapter)
-                    dt = time.time() - t0
-                    stderr = proc.stderr or ""
-                    dead_pids |= _not_found_pids(stderr, [pid for (_, pid, _) in chunk])
-                    chunk_paths = _downloaded_paths(proc.stdout or "", nas_path)
-                    downloaded.update(chunk_paths)
-                    had_rc0 = had_rc0 or proc.returncode == 0
-                    if adapter.detect_auth_error(stderr):
-                        adapter.mark_auth_invalid()
-                        aborted_sites.add(site)
-                        result.sites_aborted.append(site)
-                        db.insert_log(
-                            "ERROR", "repair",
-                            f"{site}: auth error on {handle} chunk {ci + 1}/{len(chunk_list)} "
-                            f"({dt:.1f}s); marking auth invalid, skipping site",
-                        )
-                        site_aborted = True
-                        break
-                    if adapter.detect_rate_limit_error(stderr):
-                        record_hit(site, config.rate_limit)
-                        if attempt < MAX_RATE_LIMIT_RETRIES:
-                            backoff = 60 * (2 ** attempt)
-                            db.insert_log(
-                                "WARNING", "repair",
-                                f"{site}: rate-limited on {handle} chunk {ci + 1}/{len(chunk_list)} "
-                                f"({dt:.1f}s); backoff {backoff}s "
-                                f"(attempt {attempt + 1}/{MAX_RATE_LIMIT_RETRIES + 1})",
-                            )
-                            time.sleep(backoff)
-                            # Never retry into a still-hot rate window.
-                            if is_site_paused(site, config.rate_limit):
-                                _wait_for_unpause(site, config)
-                            continue
-                        aborted_sites.add(site)
-                        result.sites_aborted.append(site)
-                        db.insert_log(
-                            "WARNING", "repair",
-                            f"{site}: rate-limit retries exhausted; skipping remaining work on site",
-                        )
-                        site_aborted = True
-                        break
-                    if proc.returncode != 0 and stderr.strip():
-                        tail = "\n".join(stderr.strip().splitlines()[-5:])[:500]
-                        db.insert_log(
-                            "WARNING", "repair",
-                            f"{handle} chunk {ci + 1}/{len(chunk_list)}: rc={proc.returncode}, "
-                            f"stderr tail: {tail}",
-                        )
+            if rewalked:
+                t0 = time.time()
+                proc = _run_batch([artist_rec.source_url], config, adapter)
+                dt = time.time() - t0
+                stderr = proc.stderr or ""
+                chunk_paths = _downloaded_paths(proc.stdout or "", nas_path)
+                downloaded.update(chunk_paths)
+                if adapter.detect_auth_error(stderr):
+                    _abort_site_auth(
+                        site, adapter, result, aborted_sites,
+                        f"{handle} timeline re-walk ({dt:.0f}s)",
+                    )
+                    site_aborted = True
+                    rewalked = False
+                elif proc.returncode == 0 and not adapter.detect_rate_limit_error(stderr):
+                    run_rows = artist_rows
+                    had_rc0 = True
                     record_success(site, config.rate_limit)
                     db.insert_log(
                         "INFO", "repair",
-                        f"{handle} chunk {ci + 1}/{len(chunk_list)}: {len(urls)} post(s) "
-                        f"in {dt:.1f}s (rc={proc.returncode}, {len(chunk_paths)} file(s) downloaded)",
+                        f"{handle}: {len(artist_rows)}/{total} rows missing "
+                        f"({len(artist_rows) / total:.0%}) — timeline re-walk landed "
+                        f"{len(chunk_paths)} file(s) in {dt:.0f}s",
                     )
-                    # Progressive reconciliation: fold rows whose loose file
-                    # just landed into the stored summary now, so the Artists
-                    # page Missing % ticks down per chunk (and survives a
-                    # crash mid-run) instead of waiting for the end-of-run
-                    # refresh. Exact-path matches only; relocated/renamed
-                    # recoveries stay for the authoritative end refresh.
+                    # Fold the recovery into the stored summary now, mirroring
+                    # the per-chunk fold below (crash-window liveness).
                     _patch_stored_summary([
-                        r for (_, _, prows) in chunk for r in prows
+                        r for r in artist_rows
                         if (nas_path / r.handle / r.filename).exists()
                     ])
-                    break
-                if site_aborted:
-                    break
-                # Pace between chunks (not after the last one).
-                if ci < len(chunk_list) - 1:
-                    mult = get_cooldown_multiplier(site)
-                    if mult >= config.rate_limit.pause_threshold:
-                        # Sustained stress: give the next chunk its own fresh
-                        # upstream window instead of the short cooldown, which
-                        # would pile successive chunks into one spent budget.
-                        _wait_for_rate_window(site, config)
-                    else:
-                        delay = random.uniform(*cooldown) * mult
+                    if max_posts is not None:
+                        # A re-walk walks the whole timeline: charge the full budget.
+                        result.posts_attempted = max_posts
+                else:
+                    if adapter.detect_rate_limit_error(stderr):
+                        record_hit(site, config.rate_limit)
+                        # Never fall back into a still-hot rate window.
+                        if is_site_paused(site, config.rate_limit):
+                            _wait_for_unpause(site, config)
+                    elif stderr.strip():
+                        tail = "\n".join(stderr.strip().splitlines()[-5:])[:500]
+                        db.insert_log(
+                            "WARNING", "repair",
+                            f"{handle} timeline re-walk stderr tail: {tail}",
+                        )
+                    db.insert_log(
+                        "WARNING", "repair",
+                        f"{handle}: timeline re-walk failed (rc={proc.returncode}, {dt:.0f}s); "
+                        f"falling back to per-post fetch",
+                    )
+                    rewalked = False
+
+            if not rewalked and not site_aborted:
+                # Partition rows by post id; drop non-numeric as unsupported.
+                by_pid: dict[str, list[MissingRow]] = {}
+                unsupported_here = 0
+                for r in rows:
+                    pid = extract_post_id(r.filename)
+                    if pid is None:
+                        unsupported_here += 1
+                        continue
+                    by_pid.setdefault(pid, []).append(r)
+                if unsupported_here:
+                    result.rows_unsupported += unsupported_here
+
+                # Build the URL list, honouring the global post cap.
+                attempted: list[tuple[str, str, list[MissingRow]]] = []  # (url, pid, rows)
+                for pid, prows in by_pid.items():
+                    if max_posts is not None and result.posts_attempted >= max_posts:
+                        break
+                    url = adapter.build_post_url(handle, pid)
+                    if url is None:
+                        result.rows_unsupported += len(prows)
+                        continue
+                    attempted.append((url, pid, prows))
+                    result.posts_attempted += 1
+
+                if not attempted:
+                    continue
+
+                db.insert_log(
+                    "INFO", "repair",
+                    f"{handle} ({site}): {len(rows)} row(s), {len(attempted)} post(s) to fetch"
+                    + (f", {unsupported_here} unsupported" if unsupported_here else ""),
+                )
+
+                cooldown = config.sites.get(site, SiteConfig()).cooldown
+                chunk_list = list(_chunks(attempted, CHUNK_SIZE))
+                for ci, chunk in enumerate(chunk_list):
+                    urls = [u for (u, _, _) in chunk]
+                    run_rows.extend(r for (_, _, prows) in chunk for r in prows)
+                    for attempt in range(MAX_RATE_LIMIT_RETRIES + 1):
+                        t0 = time.time()
+                        proc = _run_batch(urls, config, adapter)
+                        dt = time.time() - t0
+                        stderr = proc.stderr or ""
+                        dead_pids |= _not_found_pids(stderr, [pid for (_, pid, _) in chunk])
+                        chunk_paths = _downloaded_paths(proc.stdout or "", nas_path)
+                        downloaded.update(chunk_paths)
+                        had_rc0 = had_rc0 or proc.returncode == 0
+                        if adapter.detect_auth_error(stderr):
+                            _abort_site_auth(
+                                site, adapter, result, aborted_sites,
+                                f"{handle} chunk {ci + 1}/{len(chunk_list)} ({dt:.1f}s)",
+                            )
+                            site_aborted = True
+                            break
+                        if adapter.detect_rate_limit_error(stderr):
+                            record_hit(site, config.rate_limit)
+                            if attempt < MAX_RATE_LIMIT_RETRIES:
+                                backoff = 60 * (2 ** attempt)
+                                db.insert_log(
+                                    "WARNING", "repair",
+                                    f"{site}: rate-limited on {handle} chunk {ci + 1}/{len(chunk_list)} "
+                                    f"({dt:.1f}s); backoff {backoff}s "
+                                    f"(attempt {attempt + 1}/{MAX_RATE_LIMIT_RETRIES + 1})",
+                                )
+                                time.sleep(backoff)
+                                # Never retry into a still-hot rate window.
+                                if is_site_paused(site, config.rate_limit):
+                                    _wait_for_unpause(site, config)
+                                continue
+                            aborted_sites.add(site)
+                            result.sites_aborted.append(site)
+                            db.insert_log(
+                                "WARNING", "repair",
+                                f"{site}: rate-limit retries exhausted; skipping remaining work on site",
+                            )
+                            site_aborted = True
+                            break
+                        if proc.returncode != 0 and stderr.strip():
+                            tail = "\n".join(stderr.strip().splitlines()[-5:])[:500]
+                            db.insert_log(
+                                "WARNING", "repair",
+                                f"{handle} chunk {ci + 1}/{len(chunk_list)}: rc={proc.returncode}, "
+                                f"stderr tail: {tail}",
+                            )
+                        record_success(site, config.rate_limit)
                         db.insert_log(
                             "INFO", "repair",
-                            f"cooldown {delay:.0f}s (multiplier {mult:.1f})",
+                            f"{handle} chunk {ci + 1}/{len(chunk_list)}: {len(urls)} post(s) "
+                            f"in {dt:.1f}s (rc={proc.returncode}, {len(chunk_paths)} file(s) downloaded)",
                         )
-                        time.sleep(delay)
+                        # Progressive reconciliation: fold rows whose loose file
+                        # just landed into the stored summary now, so the Artists
+                        # page Missing % ticks down per chunk (and survives a
+                        # crash mid-run) instead of waiting for the end-of-run
+                        # refresh. Exact-path matches only; relocated/renamed
+                        # recoveries stay for the authoritative end refresh.
+                        _patch_stored_summary([
+                            r for (_, _, prows) in chunk for r in prows
+                            if (nas_path / r.handle / r.filename).exists()
+                        ])
+                        break
+                    if site_aborted:
+                        break
+                    # Pace between chunks (not after the last one).
+                    if ci < len(chunk_list) - 1:
+                        mult = get_cooldown_multiplier(site)
+                        if mult >= config.rate_limit.pause_threshold:
+                            # Sustained stress: give the next chunk its own fresh
+                            # upstream window instead of the short cooldown, which
+                            # would pile successive chunks into one spent budget.
+                            _wait_for_rate_window(site, config)
+                        else:
+                            delay = random.uniform(*cooldown) * mult
+                            db.insert_log(
+                                "INFO", "repair",
+                                f"cooldown {delay:.0f}s (multiplier {mult:.1f})",
+                            )
+                            time.sleep(delay)
 
             moved = _relocate_renamed(nas_path, handle, downloaded) if downloaded else 0
             resolved_before = result.rows_recovered + result.rows_updated
