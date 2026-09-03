@@ -57,6 +57,15 @@ history predating this file lives in the Git log.
   `gallery-dl timed out after Ns`. (`c970c0f`)
 
 ### Changed
+- **Artists page follow-ups: 15 rows per page, toast feedback, banner
+  clearance.** PAGE_SIZE rises from 10 to 15 — a full page plus pagination
+  still fits 1920×1080 (verified with the auth banner present). Row-action
+  feedback ("Repair started for …", "Removed …") moves from in-row
+  `st.info`/`st.success` cells — which expanded the row and disjointed the
+  table — to non-blocking `st.toast` popups that never touch layout. The
+  compact stylesheet's page top-padding is raised to clear the fixed
+  Streamlit toolbar, which had been clipping the top of the
+  re-authenticate/warning banners.
 - **Compact UI density: the full Artists page fits one screen.** A global
   compact stylesheet (`_inject_compact_css` in `src/app.py`) tightens
   Streamlit's stock vertical rhythm — block gaps, page top padding, button

@@ -56,7 +56,7 @@ def _inject_compact_css() -> None:
             div[data-testid="stVerticalBlock"], div[data-testid="stBlockContainer"] {
                 gap: 0.45rem !important;
             }
-            h1 { padding-bottom: 0.2rem !important; margin-bottom: 0.4rem !important; }
+            .block-container { padding-top: 4rem !important; padding-bottom: 1rem !important; }
             [role="tab"] { padding-top: 0.45rem !important; padding-bottom: 0.45rem !important; }
             .stButton > button, button[data-testid="stBaseButton-secondary"] {
                 padding: 0.18rem 0.55rem !important;

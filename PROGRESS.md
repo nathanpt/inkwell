@@ -56,7 +56,7 @@ Each item is sourced; none is invented.
 
 - **Passing:** `pytest` — 220 passed (full suite, observed this assessment).
 - **Not verified in CI:** tests are not part of `build.yml`; a regression can ship to `main` green-image but red-tests.
-- **Run this assessment:** the Streamlit app itself — booted headless via `scripts/dev_ui.py` (scratch config/DB/NAS under `/tmp/inkwell-ui`, login bypassed) and screenshotted with headless Chromium; Artists-page density verified at 1920×1080 and 1440×810 (10 rows + pagination per page, no clipping). Restart the process after `src/` edits — Streamlit does not hot-reload modules outside the main script's folder. **Not run:** Docker build, gallery-dl subprocess (requires credentials + NAS).
+- **Run this assessment:** the Streamlit app itself — booted headless via `scripts/dev_ui.py` (scratch config/DB/NAS under `/tmp/inkwell-ui`, login bypassed) and screenshotted with headless Chromium; Artists-page density verified at 1920×1080 (15 rows + pagination + auth banner, no clipping) and 1440×810. Restart the process after `src/` edits — Streamlit does not hot-reload modules outside the main script's folder. **Not run:** Docker build, gallery-dl subprocess (requires credentials + NAS).
 
 ## Decisions, generators, and constraints
 

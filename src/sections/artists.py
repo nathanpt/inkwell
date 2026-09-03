@@ -23,7 +23,7 @@ SITE_LABELS = {
     "deviantart": "DeviantArt",
 }
 
-PAGE_SIZE = 10
+PAGE_SIZE = 15
 
 # Artist | Files | Missing | Last scan | Download | Repair | Remove | Delete Files
 TABLE_COLS = [2.4, 1.1, 1.1, 1.4, 0.95, 0.95, 0.95, 1.15]
@@ -206,7 +206,7 @@ def render_artists():
         with col_dl:
             if st.button("Download", key=f"dl_{artist.id}", use_container_width=True):
                 _run_download(artist)
-                st.info(f"Download started for {display}")
+                st.toast(f"Download started for {display}")
         with col_rep:
             if st.button(
                 "Repair", key=f"rep_{artist.id}", use_container_width=True,
@@ -214,11 +214,11 @@ def render_artists():
                 help="Re-fetch this artist's missing files; purges rows whose posts are gone upstream.",
             ):
                 _run_repair(artist)
-                st.info(f"Repair started for {display}")
+                st.toast(f"Repair started for {display}")
         with col_rm:
             if st.button("Remove", key=f"rm_{artist.id}", use_container_width=True):
                 db.deactivate_artist(artist.id)
-                st.success(f"Removed {display} from queue")
+                st.toast(f"Removed {display} from queue")
                 st.rerun()
         with col_del:
             if st.button("Delete Files", key=f"del_{artist.id}", use_container_width=True):
@@ -226,7 +226,7 @@ def render_artists():
                 artist_dir = Path(config.nas.mount_path) / artist.handle
                 if artist_dir.exists():
                     shutil.rmtree(artist_dir)
-                st.success(f"Removed {display} and deleted files")
+                st.toast(f"Removed {display} and deleted files")
                 st.rerun()
 
     st.divider()

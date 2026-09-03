@@ -96,10 +96,10 @@ class TestArtistsTable:
         # Distinct added_at values: ORDER BY added_at must not depend on
         # second-granularity timestamp ties. Insert via per-op connections
         # first, then update timestamps in one short-lived transaction.
-        for i in range(1, 16):
+        for i in range(1, 17):
             db.insert_artist(Artist(handle=f"artist{i}", site="x.com", source_url=f"https://x.com/artist{i}"))
         conn = db.connect(db_path)
-        for i in range(1, 16):
+        for i in range(1, 17):
             conn.execute(
                 "UPDATE artists SET added_at = ? WHERE handle = ?",
                 (f"2026-01-01 00:{(i - 1) // 60:02d}:{(i - 1) % 60:02d}", f"artist{i}"),
@@ -117,7 +117,7 @@ class TestArtistsTable:
         at.button(key="artist_page_last").click().run()
         values = [m.value for m in at.markdown]
         assert any("Page 2 of 2" in v for v in values)
-        assert any("**@artist11**" in v for v in values)
+        assert any("**@artist16**" in v for v in values)
         assert not any("**@artist1**" in v for v in values)
 
         at.button(key="artist_page_first").click().run()
