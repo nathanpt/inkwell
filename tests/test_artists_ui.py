@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 from streamlit.testing.v1 import AppTest
@@ -73,9 +74,9 @@ class TestArtistsTable:
 
         values = [m.value for m in at.markdown]
         assert any("1/3 (33.3%)" in v for v in values)
-        captions = [c.value for c in at.caption]
-        for header in ("Artist", "Files", "Missing", "Last scan"):
-            assert header in captions
+        # Header cells are now sort buttons
+        for key in ("artist", "files", "missing", "scan"):
+            assert at.button(key=f"artist_sort_{key}") is not None
         # One artist -> one page -> pagination controls hidden
         with pytest.raises(KeyError):
             at.button(key="artist_page_first")
@@ -123,3 +124,59 @@ class TestArtistsTable:
         values = [m.value for m in at.markdown]
         assert any("Page 1 of 2" in v for v in values)
         assert any("**@artist1**" in v for v in values)
+
+    def test_sort_by_each_column(self, tmp_path):
+        db_path = _setup_db(tmp_path)
+        # zed, mid, abc inserted with distinct added_at -> default order zed, mid, abc.
+        # files: zed 1, mid 2, abc 0. Missing (last check): zed 2, mid 0, abc unchecked.
+        # last_scan: zed Feb, mid Mar, abc Jan.
+        ids = {}
+        for i, handle in enumerate(("zed", "mid", "abc")):
+            ids[handle] = db.insert_artist(
+                Artist(handle=handle, site="x.com", source_url=f"https://x.com/{handle}")
+            )
+        db.insert_file_records(None, ids["zed"], [("2024/z.jpg", "2024", 10)])
+        db.insert_file_records(None, ids["mid"], [("2024/m1.jpg", "2024", 10), ("2024/m2.jpg", "2024", 10)])
+        db.set_state("integrity:last_check", json.dumps({
+            "total": 3, "ok": 1, "missing": 2,
+            "by_artist": {str(ids["zed"]): 2, str(ids["mid"]): 0},
+        }))
+        scans = {"zed": "2026-02-02 00:00:00", "mid": "2026-03-03 00:00:00", "abc": "2026-01-01 00:00:00"}
+        added = {"zed": "2026-01-01 00:00:00", "mid": "2026-01-01 00:00:01", "abc": "2026-01-01 00:00:02"}
+        conn = db.connect(db_path)
+        for handle in ids:
+            conn.execute(
+                "UPDATE artists SET added_at = ?, last_scan_at = ? WHERE handle = ?",
+                (added[handle], scans[handle], handle),
+            )
+        conn.commit()
+        conn.close()
+
+        at = _make_at(tmp_path, db_path)
+
+        def handles():
+            return [
+                m.group(1)
+                for m in (re.search(r"\*\*@(.*?)\*\*", v.value) for v in at.markdown)
+                if m
+            ]
+
+        assert handles() == ["zed", "mid", "abc"]
+
+        at.button(key="artist_sort_artist").click().run()
+        assert handles() == ["abc", "mid", "zed"]
+        at.button(key="artist_sort_artist").click().run()  # toggle -> descending
+        assert handles() == ["zed", "mid", "abc"]
+
+        at.button(key="artist_sort_files").click().run()
+        assert handles() == ["abc", "zed", "mid"]  # 0, 1, 2 files
+        at.button(key="artist_sort_files").click().run()
+        assert handles() == ["mid", "zed", "abc"]  # 2, 1, 0 files
+
+        at.button(key="artist_sort_missing").click().run()
+        assert handles() == ["abc", "mid", "zed"]  # unchecked ("—"), 0, 2
+        at.button(key="artist_sort_missing").click().run()
+        assert handles() == ["zed", "mid", "abc"]  # 2, 0, unchecked
+
+        at.button(key="artist_sort_scan").click().run()
+        assert handles() == ["abc", "zed", "mid"]  # Jan, Feb, Mar

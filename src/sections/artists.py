@@ -111,6 +111,27 @@ def render_artists():
         st.info("No artists match your search.")
         return
 
+    # Column sort (set by the header buttons below); unset = db order (added_at)
+    sort_spec = st.session_state.get("artist_sort")
+    if sort_spec is not None:
+        sort_key, sort_asc = sort_spec
+
+        def _sort_value(a):
+            if sort_key == "artist":
+                return registry.get(a.site).get_display_handle(a).lower()
+            if sort_key == "files":
+                return disk_usage.get(a.id, (0, 0))[0]
+            if sort_key == "missing":
+                # Unchecked artists ("—") sort below 0 missing
+                return by_artist.get(str(a.id), -1)
+            return a.last_scan_at or ""  # scan: "Never" sorts as oldest
+
+        artists = sorted(
+            artists,
+            key=lambda a: (_sort_value(a), a.handle.lower(), a.id or 0),
+            reverse=not sort_asc,
+        )
+
     # Pagination
     total_pages = max(1, -(-len(artists) // PAGE_SIZE))  # ceil division
     page = st.session_state.get("artist_page", 0)
@@ -141,10 +162,14 @@ def render_artists():
                 st.rerun()
 
     hdr = st.columns(TABLE_COLS)
-    hdr[0].caption("Artist")
-    hdr[1].caption("Files")
-    hdr[2].caption("Missing")
-    hdr[3].caption("Last scan")
+    with hdr[0]:
+        _sort_header("artist", "Artist")
+    with hdr[1]:
+        _sort_header("files", "Files")
+    with hdr[2]:
+        _sort_header("missing", "Missing")
+    with hdr[3]:
+        _sort_header("scan", "Last scan")
     st.divider()
 
     for i, artist in enumerate(page_artists):
@@ -183,6 +208,17 @@ def render_artists():
                     shutil.rmtree(artist_dir)
                 st.success(f"Removed {display} and deleted files")
                 st.rerun()
+
+
+def _sort_header(col: str, label: str) -> None:
+    """Clickable column header: first click sorts ascending, next toggles
+    direction; changing columns resets to ascending and to page 1."""
+    key, asc = st.session_state.get("artist_sort", (None, True))
+    arrow = "" if key != col else (" ↑" if asc else " ↓")
+    if st.button(f"{label}{arrow}", key=f"artist_sort_{col}", use_container_width=True):
+        st.session_state.artist_sort = (col, not asc) if key == col else (col, True)
+        st.session_state.artist_page = 0
+        st.rerun()
 
 
 def _missing_cell(by_artist: dict[str, int], artist_id: int | None, total: int) -> str:

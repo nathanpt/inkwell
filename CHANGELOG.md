@@ -17,6 +17,11 @@ history predating this file lives in the Git log.
   per-artist missing counts under `integrity:last_check` (`by_artist`), showing `0/…`
   for clean artists and `—` when no check has run or the artist has no files. Pagination
   gains First/Last buttons alongside Prev/Next.
+- **Artists table columns are sortable.** Artist / Files / Missing / Last-scan
+  headers are now click-to-sort buttons: first click sorts ascending, clicking again
+  toggles direction (arrow shown on the active column), switching columns resets to
+  ascending and back to page 1. Unchecked artists ("—") sort below 0 missing;
+  "Never" sorts as the oldest scan. Search, pagination, and actions unchanged.
 
 
 ### Fixed
