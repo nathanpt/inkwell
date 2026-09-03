@@ -564,3 +564,114 @@ class TestRepairAuthSkip:
         filenames = {r["filename"] for r in db.get_all_file_rows()}
         assert "2024/111_a.jpg" in filenames   # x.com recovered
         assert "2024/555_art.jpg" in filenames  # pixiv row left untouched
+
+
+class TestRemovedUpstream:
+    """Rows whose own post URL is positively confirmed dead are purged even
+    when the artist yields zero recoveries (the all-deleted-artist case)."""
+
+    def test_not_found_pids_parsing(self):
+        from src.repair import _not_found_pids
+
+        stderr = "\n".join([
+            "[error][twitter] https://x.com/alice/status/111: 404 Not Found ('Not Found')",
+            "[error][twitter] https://x.com/alice/status/222: http 404",
+            "[error][pixiv] https://www.pixiv.net/artworks/333: The illustration has been deleted",
+            "[warning][twitter] https://x.com/alice/status/444: 429 Too Many Requests",
+            "[error][twitter] https://x.com/alice/status/555: 401 Unauthorized",
+        ])
+        confirmed = _not_found_pids(stderr, ["111", "222", "333", "444", "555", "666"])
+        assert confirmed == {"111", "222", "333"}
+
+    def test_pid_word_boundary_no_false_ride_along(self):
+        from src.repair import _not_found_pids
+
+        stderr = "[error][twitter] https://x.com/alice/status/1234: 404 Not Found"
+        assert _not_found_pids(stderr, ["123", "1234"]) == {"1234"}
+
+    def test_all_deleted_artist_rows_purged(self, setup, monkeypatch):
+        config, registry, nas = setup
+        artist = _make_artist()
+        _insert_file(artist.id, "2024/111_a.jpg", "2024")
+        _insert_file(artist.id, "2024/222_b.jpg", "2024")
+
+        monkeypatch.setattr("src.repair.time.sleep", lambda *_: None)
+
+        def fake_batch(urls, config, adapter):
+            stderr = "\n".join(
+                f"[error][twitter] https://x.com/alice/status/{url.rsplit('/', 1)[-1]}: "
+                f"404 Not Found ('Not Found')"
+                for url in urls
+            )
+            return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=stderr)
+
+        with patch("src.repair._run_batch", side_effect=fake_batch):
+            result = repair_missing(config, registry)
+
+        assert result.rows_recovered == 0
+        assert result.rows_removed_upstream == 2
+        assert result.rows_deleted == 2
+        assert result.artists_no_recovery == 0
+        assert db.get_all_file_rows() == []
+        msgs = [lg["message"] for lg in db.get_logs(source="repair")]
+        assert any("confirmed removed upstream" in m for m in msgs)
+        # All rows accounted for as removed -> no misleading rename hint
+        assert not any("Possible author rename" in m for m in msgs)
+
+    def test_confirmed_dead_mixed_with_recovered_and_inferred(self, setup, monkeypatch):
+        config, registry, nas = setup
+        artist = _make_artist()
+        _insert_file(artist.id, "2024/111_a.jpg", "2024")  # will recover
+        _insert_file(artist.id, "2024/222_b.jpg", "2024")  # 404-confirmed
+        _insert_file(artist.id, "2024/333_c.jpg", "2024")  # yields nothing, no confirmation
+
+        monkeypatch.setattr("src.repair.time.sleep", lambda *_: None)
+
+        def fake_batch(urls, config, adapter):
+            ydir = nas / "alice" / "2024"
+            ydir.mkdir(parents=True, exist_ok=True)
+            stderr = ""
+            for url in urls:
+                pid = url.rsplit("/", 1)[-1]
+                if pid == "222":
+                    stderr += (
+                        f"[error][twitter] https://x.com/alice/status/{pid}: "
+                        f"404 Not Found ('Not Found')\n"
+                    )
+                elif pid == "111":
+                    (ydir / f"{pid}_a.jpg").write_bytes(b"data")
+                # 333: exists upstream in the scenario, but yields nothing here
+            return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=stderr)
+
+        with patch("src.repair._run_batch", side_effect=fake_batch):
+            result = repair_missing(config, registry)
+
+        assert result.rows_recovered == 1
+        assert result.rows_removed_upstream == 1
+        # 222 confirmed + 333 inferred (sibling 111 recovered proves reachability)
+        assert result.rows_deleted == 2
+        filenames = {r["filename"] for r in db.get_all_file_rows()}
+        assert filenames == {"2024/111_a.jpg"}
+
+    def test_unconfirmed_failure_keeps_safeguard(self, setup, monkeypatch):
+        config, registry, nas = setup
+        artist = _make_artist()
+        _insert_file(artist.id, "2024/111_a.jpg", "2024")
+
+        monkeypatch.setattr("src.repair.time.sleep", lambda *_: None)
+
+        def fake_batch(urls, config, adapter):
+            # 5xx mentioning the URL: an error, but NOT positive removal evidence
+            stderr = "\n".join(
+                f"[error][twitter] https://x.com/alice/status/{url.rsplit('/', 1)[-1]}: "
+                f"503 Service Unavailable"
+                for url in urls
+            )
+            return subprocess.CompletedProcess(args=[], returncode=1, stdout="", stderr=stderr)
+
+        with patch("src.repair._run_batch", side_effect=fake_batch):
+            result = repair_missing(config, registry)
+
+        assert result.rows_removed_upstream == 0
+        assert result.rows_deleted == 0
+        assert len(db.get_all_file_rows()) == 1  # safeguard keeps the row

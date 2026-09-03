@@ -17,7 +17,7 @@
 
 ## Confirmed working surfaces
 
-- **Tests:** `.venv/bin/python -m pytest tests/ -q` → **209 passed** (observed 2026-09-03, ~1.3s; includes the first `streamlit.testing.v1.AppTest` UI tests in `tests/test_artists_ui.py`). Local venv runs Python 3.14.4; production image is `python:3.12-slim` (Dockerfile).
+- **Tests:** `.venv/bin/python -m pytest tests/ -q` → **214 passed** (observed 2026-09-03, ~1.3s; includes the first `streamlit.testing.v1.AppTest` UI tests in `tests/test_artists_ui.py`). Local venv runs Python 3.14.4; production image is `python:3.12-slim` (Dockerfile).
 - **Entry point:** `streamlit run src/app.py` (compose `CMD`). `main()` → `bootstrap()` → scheduler setup → dashboard render. See `src/app.py`.
 - **Schema:** SQLite, `PRAGMA user_version = 6`. Migrations: v2→v3 added the `files` table; v3→v4 added `idx_files_downloaded`; v4→v5 deduped `(artist_id, filename)` rows and enforced uniqueness; v5→v6 canonicalized x.com artist `source_url`s to `…/media?filter=photo`. See `src/db.py`, `src/bootstrap.py`.
 - **Download engine:** `gallery-dl` invoked as subprocess from `src/downloader.py`; one artist at a time, per-artist job lock, directory-diff metrics. gallery-dl stderr is mirrored to the `logs` table (`source='gallery-dl'`), and a download timeout re-raises as a failed job (`timed out after Ns`, not a masked exit code).
@@ -54,7 +54,7 @@ Each item is sourced; none is invented.
 
 ## Verification status
 
-- **Passing:** `pytest` — 209 passed (full suite, observed this assessment).
+- **Passing:** `pytest` — 214 passed (full suite, observed this assessment).
 - **Not verified in CI:** tests are not part of `build.yml`; a regression can ship to `main` green-image but red-tests.
 - **Not run this assessment:** the Streamlit app itself (not launched here), Docker build, gallery-dl subprocess (requires credentials + NAS).
 

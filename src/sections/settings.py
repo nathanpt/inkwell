@@ -125,9 +125,15 @@ def _render_integrity():
     if last_result:
         r = json.loads(last_result)
         resolved = r.get("rows_recovered", 0) + r.get("rows_updated", 0)
+        deleted = r.get("rows_deleted", 0)
         msg = (
-            f"Last repair: {resolved} recovered/updated, {r.get('rows_deleted', 0)} deleted, "
-            f"{r.get('rows_ambiguous', 0)} ambiguous"
+            f"Last repair: {resolved} recovered/updated, {deleted} deleted"
+            + (
+                f" ({r.get('rows_removed_upstream', 0)} removed upstream)"
+                if r.get("rows_removed_upstream", 0)
+                else ""
+            )
+            + f", {r.get('rows_ambiguous', 0)} ambiguous"
         )
         if r.get("aborted_reason"):
             msg += f" (aborted: {r['aborted_reason']})"

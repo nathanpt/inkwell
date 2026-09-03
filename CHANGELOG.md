@@ -23,6 +23,18 @@ history predating this file lives in the Git log.
   ascending and back to page 1. Unchecked artists ("—") sort below 0 missing;
   "Never" sorts as the oldest scan. Search, pagination, and actions unchanged.
 
+- **Repair purges rows confirmed removed upstream.** gallery-dl stderr is now
+  scanned per chunk for positive not-found evidence (404 / "not found" /
+  "deleted" on a line carrying the post's numeric id); a row whose own URL was
+  reported dead is deleted from the `files` table even when the artist yielded
+  zero recoveries — artists who deleted most or all of their media no longer
+  keep a permanent Missing % and no longer burn repair call budget on dead
+  posts every run. Purges are audit-logged with their post ids, counted as
+  `rows_removed_upstream` in the repair summary and Settings ("N removed
+  upstream"). 429/401/5xx lines never confirm a removal, and unconfirmed rows
+  keep the existing zero-recovery safeguard. The misleading "possible author
+  rename" hint is suppressed when every unfetched row was confirmed removed.
+
 
 ### Fixed
 - **Download timeout no longer masked as `exited with code -9`.** `_run_gallery_dl`

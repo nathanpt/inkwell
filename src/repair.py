@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 import json
 import logging
 import os
@@ -34,12 +36,18 @@ CHUNK_SIZE = 5
 # but further blind retries into a hot/escalating window just deepen X's lockout
 # without recovering files. The next scheduled run picks up the remainder.
 MAX_RATE_LIMIT_RETRIES = 1
+# gallery-dl stderr substrings that positively identify a dead post. A line
+# counts only when it also carries the post's numeric id (see _not_found_pids),
+# so 429/401 noise never confirms a removal.
+NOT_FOUND_MARKERS = ("404", "not found", "deleted")
 
 
 @dataclass
 class RepairResult:
     missing_before: int = 0
     sibling_entries_recovered: int = 0
+    rows_removed_upstream: int = 0  # own URL positively confirmed gone (404/not found/deleted)
+    rows_deleted: int = 0        # total deleted: confirmed + inferred unrecoverable
     posts_attempted: int = 0
     rows_recovered: int = 0      # exact basename match
     rows_updated: int = 0        # basename changed, row updated
@@ -55,6 +63,26 @@ def extract_post_id(filename: str) -> str | None:
     """Numeric post ID prefix of a basename (X tweet_id / Pixiv id / DA deviation_id)."""
     m = POST_ID_RE.match(Path(filename).name)
     return m.group(1) if m else None
+
+
+
+def _not_found_pids(stderr: str, pids: Iterable[str]) -> set[str]:
+    """Post ids that gallery-dl reported as gone upstream (404 / not found /
+    deleted).
+
+    gallery-dl echoes the failing URL — hence the numeric post id — on its
+    error lines, e.g. ``[error][twitter] https://x.com/a/status/123: 404 Not
+    Found``. A pid counts only when some line pairs it with a NOT_FOUND_MARKER,
+    so rate-limit, auth, and 5xx lines never confirm a removal. Ids are matched
+    on word boundaries: pid 123 must not ride along on 1234's error line.
+    """
+    lines = stderr.lower().splitlines()
+    confirmed: set[str] = set()
+    for pid in pids:
+        pat = re.compile(rf"\b{re.escape(pid)}\b")
+        if any(pat.search(line) and m in line for line in lines for m in NOT_FOUND_MARKERS):
+            confirmed.add(pid)
+    return confirmed
 
 
 def _run_batch(
@@ -322,6 +350,7 @@ def repair_missing(
             site_aborted = False
             downloaded: set[Path] = set()
             had_rc0 = False
+            dead_pids: set[str] = set()  # pids gallery-dl positively reported gone
             for ci, chunk in enumerate(chunk_list):
                 urls = [u for (u, _, _) in chunk]
                 run_rows.extend(r for (_, _, prows) in chunk for r in prows)
@@ -330,6 +359,7 @@ def repair_missing(
                     proc = _run_batch(urls, config, adapter)
                     dt = time.time() - t0
                     stderr = proc.stderr or ""
+                    dead_pids |= _not_found_pids(stderr, [pid for (_, pid, _) in chunk])
                     chunk_paths = _downloaded_paths(proc.stdout or "", nas_path)
                     downloaded.update(chunk_paths)
                     had_rc0 = had_rc0 or proc.returncode == 0
@@ -401,9 +431,11 @@ def repair_missing(
 
             moved = _relocate_renamed(nas_path, handle, downloaded) if downloaded else 0
             resolved_before = result.rows_recovered + result.rows_updated
-            _reconcile_artist(nas_path, handle, run_rows, result)
+            removed_before = result.rows_removed_upstream
+            _reconcile_artist(nas_path, handle, run_rows, result, dead_pids)
             resolved_gained = (result.rows_recovered + result.rows_updated) - resolved_before
-            if resolved_gained == 0 and had_rc0 and run_rows:
+            removed_gained = result.rows_removed_upstream - removed_before
+            if resolved_gained == 0 and removed_gained == 0 and had_rc0 and run_rows:
                 pid = extract_post_id(run_rows[0].filename) or "?"
                 db.insert_log(
                     "WARNING", "repair",
@@ -419,9 +451,20 @@ def repair_missing(
 
 
 def _reconcile_artist(
-    nas_path: Path, handle: str, rows: list[MissingRow], result: RepairResult
+    nas_path: Path,
+    handle: str,
+    rows: list[MissingRow],
+    result: RepairResult,
+    dead_pids: set[str] | None = None,
 ) -> None:
-    """Match an artist's attempted rows against the loose files gallery-dl wrote."""
+    """Match an artist's attempted rows against the loose files gallery-dl wrote.
+
+    Rows whose own post URL was positively reported gone upstream (``dead_pids``,
+    from gallery-dl's per-URL not-found errors) are deleted unconditionally.
+    Remaining unfetched rows are only deleted under the artist-level safeguard
+    below — that inference needs at least one proof of reachability.
+    """
+    dead_pids = dead_pids or set()
     if not rows:
         return
 
@@ -438,7 +481,9 @@ def _reconcile_artist(
         actual_by_year[y] = files
         claimed_by_year[y] = set()
 
-    to_delete: list[int] = []
+    confirmed_dead: list[int] = []  # own URL reported 404/not found/deleted
+    to_delete: list[int] = []       # yielded nothing; artist-level inference
+    dead_by_pid: dict[str, int] = {}  # pid -> row id, for the audit log
     recovered = updated = ambiguous = 0
     for r in rows:
         base = Path(r.filename).name
@@ -468,16 +513,34 @@ def _reconcile_artist(
             logger.warning(
                 "Ambiguous recovery for %s row %d: %d candidates", handle, r.file_id, len(candidates)
             )
+        elif pid and pid in dead_pids:
+            confirmed_dead.append(r.file_id)
+            dead_by_pid[pid] = r.file_id
         else:
             to_delete.append(r.file_id)
+
+    # Positive evidence: the platform itself said these posts are gone. Safe to
+    # purge even when nothing else about the artist was reachable this run.
+    removed = 0
+    if confirmed_dead:
+        removed = db.delete_file_records(confirmed_dead)
+        result.rows_removed_upstream += removed
+        result.rows_deleted += removed
+        pids = sorted(dead_by_pid)
+        shown = ", ".join(pids[:20]) + ("…" if len(pids) > 20 else "")
+        db.insert_log(
+            "INFO", "repair",
+            f"{handle}: purged {removed} row(s) confirmed removed upstream "
+            f"(post id(s): {shown})",
+        )
 
     # Deletion safeguard: only delete when at least one row proved gallery-dl
     # could reach this artist's posts. A systemic failure (rename, auth) keeps
     # all rows so the operator can intervene.
-    deleted = 0
+    deleted = removed
     if recovered + updated > 0:
-        deleted = db.delete_file_records(to_delete)
-        result.rows_deleted += deleted
+        deleted += db.delete_file_records(to_delete)
+        result.rows_deleted += deleted - removed
     elif to_delete:
         result.artists_no_recovery += 1
         db.insert_log(
@@ -488,7 +551,8 @@ def _reconcile_artist(
     db.insert_log(
         "INFO", "repair",
         f"reconcile {handle}: {recovered} recovered, {updated} updated, "
-        f"{deleted} deleted, {ambiguous} ambiguous (of {len(rows)} attempted)",
+        f"{deleted} deleted ({removed} removed upstream), {ambiguous} ambiguous "
+        f"(of {len(rows)} attempted)",
     )
 
 
@@ -500,7 +564,12 @@ def _store_result(result: RepairResult, run_start: float) -> None:
     level = "INFO" if resolved > 0 or result.missing_before == 0 else "WARNING"
     parts = [
         f"Repair done in {elapsed:.0f}s: {resolved} recovered/updated ({rate:.1f} files/min)",
-        f"{result.rows_deleted} deleted",
+        f"{result.rows_deleted} deleted"
+        + (
+            f" ({result.rows_removed_upstream} confirmed removed upstream)"
+            if result.rows_removed_upstream
+            else ""
+        ),
         f"{result.rows_ambiguous} ambiguous",
         f"{result.rows_unsupported} unsupported",
     ]
