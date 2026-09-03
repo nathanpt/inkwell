@@ -18,6 +18,7 @@ history predating this file lives in the Git log.
   for clean artists and `—` when no check has run or the artist has no files. Pagination
   gains First/Last buttons alongside Prev/Next.
 
+
 ### Fixed
 - **Download timeout no longer masked as `exited with code -9`.** `_run_gallery_dl`
   (`src/downloader.py`) caught `subprocess.TimeoutExpired`, SIGKILLed the process
@@ -35,3 +36,7 @@ history predating this file lives in the Git log.
 - **Download timeout raised from 600s (10 min) to 1200s (20 min)** so cold x.com
   `UserMedia` walks — whose enumeration is API-paced (`sleep-request`) and is not
   skipped by `archive.db` — finish in one pass. (`c970c0f`)
+- **Dashboard switches to Streamlit's wide layout** (`st.set_page_config(layout="wide")`
+  in `src/app.py`). The default centered container (~734px) truncated the Artists table's
+  action buttons (`Download` → `Do…`) and wrapped the Files / Last-scan cells; wide gives
+  every column room on normal desktop widths. Also sets the browser tab title to "Inkwell".

@@ -100,8 +100,10 @@ def _render_dashboard():
 
 
 def main():
+    # Must be the first st command; wide layout gives tabular surfaces
+    # (Artists table, job history) room that the centered ~734px column starves.
+    st.set_page_config(page_title="Inkwell", layout="wide")
     _init_session_state()
-
     if not st.session_state.authenticated:
         _render_login()
         return
