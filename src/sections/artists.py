@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 import threading
@@ -22,6 +23,9 @@ SITE_LABELS = {
 }
 
 PAGE_SIZE = 10
+
+# Artist | Files | Missing | Last scan | Download | Remove | Delete Files
+TABLE_COLS = [2.6, 1.2, 1.2, 1.4, 1.0, 1.0, 1.2]
 
 
 def _run_download(artist):
@@ -84,6 +88,14 @@ def render_artists():
 
     disk_usage = db.get_disk_usage_by_artist()
 
+    by_artist: dict[str, int] = {}
+    raw = db.get_state("integrity:last_check")
+    if raw:
+        try:
+            by_artist = json.loads(raw).get("by_artist") or {}
+        except ValueError:
+            by_artist = {}
+
     # Total summary
     total_files = sum(disk_usage.get(a.id, (0, 0))[0] for a in artists)
     total_bytes = sum(disk_usage.get(a.id, (0, 0))[1] for a in artists)
@@ -108,7 +120,11 @@ def render_artists():
     page_artists = artists[page_start:page_end]
 
     if total_pages > 1:
-        col_prev, col_info, col_next = st.columns([1, 2, 1])
+        col_first, col_prev, col_info, col_next, col_last = st.columns([1, 1, 2, 1, 1])
+        with col_first:
+            if st.button("First", disabled=(page == 0), key="artist_page_first"):
+                st.session_state.artist_page = 0
+                st.rerun()
         with col_prev:
             if st.button("Prev", disabled=(page == 0), key="artist_page_prev"):
                 st.session_state.artist_page = page - 1
@@ -119,18 +135,37 @@ def render_artists():
             if st.button("Next", disabled=(page >= total_pages - 1), key="artist_page_next"):
                 st.session_state.artist_page = page + 1
                 st.rerun()
+        with col_last:
+            if st.button("Last", disabled=(page >= total_pages - 1), key="artist_page_last"):
+                st.session_state.artist_page = total_pages - 1
+                st.rerun()
 
-    for artist in page_artists:
+    hdr = st.columns(TABLE_COLS)
+    hdr[0].caption("Artist")
+    hdr[1].caption("Files")
+    hdr[2].caption("Missing")
+    hdr[3].caption("Last scan")
+    st.divider()
+
+    for i, artist in enumerate(page_artists):
+        if i:
+            st.divider()
         adapter = registry.get(artist.site)
         display = adapter.get_display_handle(artist)
         site_label = SITE_LABELS.get(artist.site, artist.site)
+        count, size = disk_usage.get(artist.id, (0, 0))
 
-        col_info, col_dl, col_rm, col_del = st.columns([0.50, 0.17, 0.17, 0.17], vertical_alignment="center")
+        col_info, col_files, col_missing, col_scan, col_dl, col_rm, col_del = st.columns(
+            TABLE_COLS, vertical_alignment="center"
+        )
         with col_info:
-            last_scan = artist.last_scan_at or "Never"
-            count, size = disk_usage.get(artist.id, (0, 0))
-            meta = f"{count:,} file(s) · {_format_bytes(size)}" if count > 0 else "No files"
-            st.markdown(f"**{display}** ({site_label}) — last scan: {last_scan}  \n{meta}")
+            st.markdown(f"**{display}** · {site_label}")
+        with col_files:
+            st.markdown(f"{count:,} · {_format_bytes(size)}" if count else "—")
+        with col_missing:
+            st.markdown(_missing_cell(by_artist, artist.id, count))
+        with col_scan:
+            st.markdown(artist.last_scan_at or "Never")
         with col_dl:
             if st.button("Download", key=f"dl_{artist.id}", use_container_width=True):
                 _run_download(artist)
@@ -148,6 +183,16 @@ def render_artists():
                     shutil.rmtree(artist_dir)
                 st.success(f"Removed {display} and deleted files")
                 st.rerun()
+
+
+def _missing_cell(by_artist: dict[str, int], artist_id: int | None, total: int) -> str:
+    """'m/t (p%)' from the last integrity check; '—' when unchecked or fileless."""
+    if not total or artist_id is None:
+        return "—"
+    missing = by_artist.get(str(artist_id))
+    if missing is None:
+        return "—"
+    return f"{missing}/{total} ({missing / total:.1%})"
 
 
 def _format_bytes(n: int) -> str:

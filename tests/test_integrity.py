@@ -15,6 +15,7 @@ from src.integrity import (
     file_available,
     find_sibling_zips,
 )
+from src.models import Artist
 
 
 class TestFileAvailable:
@@ -120,6 +121,26 @@ class TestCheckIntegrity:
         assert data["ok"] == 2
         assert data["missing"] == 1
         assert data["sibling_zips"] == 1
+
+    def test_persists_per_artist_missing_counts(self, tmp_path, configured_db):
+        nas = tmp_path / "nas"
+        ok_dir = nas / "okartist" / "2024"
+        bad_dir = nas / "badartist" / "2024"
+        ok_dir.mkdir(parents=True)
+        bad_dir.mkdir(parents=True)
+        (ok_dir / "a.jpg").write_bytes(b"a")
+        (ok_dir / "b.jpg").write_bytes(b"b")
+        (bad_dir / "c.jpg").write_bytes(b"c")
+
+        ok_id = db.insert_artist(Artist(handle="okartist", site="x.com", source_url="https://x.com/okartist"))
+        bad_id = db.insert_artist(Artist(handle="badartist", site="x.com", source_url="https://x.com/badartist"))
+        db.insert_file_records(None, ok_id, [("2024/a.jpg", "2024", 1), ("2024/b.jpg", "2024", 1)])
+        db.insert_file_records(None, bad_id, [("2024/c.jpg", "2024", 1), ("2024/missing.jpg", "2024", 0)])
+
+        check_integrity(Config(nas=NASConfig(mount_path=str(nas))))
+
+        data = json.loads(db.get_state("integrity:last_check"))
+        assert data["by_artist"] == {str(ok_id): 0, str(bad_id): 1}
 
 
 class TestConsolidateSiblingZips:

@@ -136,6 +136,12 @@ def check_integrity(config: Config) -> IntegrityReport:
                 )
             )
 
+    # Per-artist missing counts: every scanned artist seeded to 0, so an artist
+    # absent from this dict means "not present at last check" (UI shows "—").
+    by_artist: dict[str, int] = {str(row["artist_id"]): 0 for row in rows}
+    for m in missing:
+        by_artist[str(m.artist_id)] += 1
+
     report = IntegrityReport(
         total=len(rows),
         ok=ok,
@@ -149,6 +155,7 @@ def check_integrity(config: Config) -> IntegrityReport:
         "ok": report.ok,
         "missing": len(report.missing),
         "sibling_zips": report.sibling_zips,
+        "by_artist": by_artist,
     }
     db.set_state("integrity:last_check", json.dumps(summary))
     level = "WARNING" if report.missing else "INFO"

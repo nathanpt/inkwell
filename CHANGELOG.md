@@ -9,6 +9,15 @@ history predating this file lives in the Git log.
 
 ## [Unreleased]
 
+### Added
+- **Artists tab: table layout with a Missing column and First/Last pagination.** The
+  artist list renders as a subtle table (caption header row, hairline dividers) with
+  per-artist Files, Missing, and Last-scan columns; the Missing cell shows
+  `missing/total (p%)` from the last integrity check — `check_integrity` now persists
+  per-artist missing counts under `integrity:last_check` (`by_artist`), showing `0/…`
+  for clean artists and `—` when no check has run or the artist has no files. Pagination
+  gains First/Last buttons alongside Prev/Next.
+
 ### Fixed
 - **Download timeout no longer masked as `exited with code -9`.** `_run_gallery_dl`
   (`src/downloader.py`) caught `subprocess.TimeoutExpired`, SIGKILLed the process
