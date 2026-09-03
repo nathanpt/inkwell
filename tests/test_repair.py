@@ -757,3 +757,78 @@ class TestTargetedRepair:
         summary = json.loads(db.get_state("integrity:last_check"))
         assert summary["total"] == 1
         assert summary["by_artist"] == {str(artist.id): 0}
+
+
+class TestProgressiveReconciliation:
+    """Chunk recoveries fold into integrity:last_check immediately, so the
+    Artists page Missing % reconciles during the run — and survives a crash
+    before the end-of-run refresh."""
+
+    def test_summary_patched_per_chunk(self, setup, monkeypatch):
+        config, registry, nas = setup
+        artist = _make_artist()
+        for pid in ("111", "222", "333", "444", "555", "666"):
+            _insert_file(artist.id, f"2024/{pid}_a.jpg", "2024")
+
+        monkeypatch.setattr("src.repair.time.sleep", lambda *_: None)
+
+        snapshots = []
+
+        def fake_batch(urls, config, adapter):
+            snapshots.append(db.get_state("integrity:last_check"))
+            ydir = nas / "alice" / "2024"
+            ydir.mkdir(parents=True, exist_ok=True)
+            for url in urls:
+                pid = url.rsplit("/", 1)[-1]
+                (ydir / f"{pid}_a.jpg").write_bytes(b"data")
+            return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+        with patch("src.repair._run_batch", side_effect=fake_batch):
+            result = repair_missing(config, registry)
+
+        # 6 rows / chunk size 5 -> 2 chunks. Before chunk 2 starts, the stored
+        # summary must already reflect chunk 1's five recoveries (the initial
+        # walk stored missing=6).
+        mid = json.loads(snapshots[1])
+        assert mid["missing"] == 1
+        assert mid["ok"] == 5
+        assert mid["by_artist"] == {str(artist.id): 1}
+        # End-of-run refresh stays authoritative: everything recovered.
+        final = json.loads(db.get_state("integrity:last_check"))
+        assert final["missing"] == 0
+        assert final["by_artist"] == {str(artist.id): 0}
+        assert result.rows_recovered == 6
+
+    def test_crash_mid_run_keeps_chunk_summary(self, setup, monkeypatch):
+        config, registry, nas = setup
+        artist = _make_artist()
+        for pid in ("111", "222", "333", "444", "555", "666"):
+            _insert_file(artist.id, f"2024/{pid}_a.jpg", "2024")
+
+        monkeypatch.setattr("src.repair.time.sleep", lambda *_: None)
+
+        calls = {"n": 0}
+
+        def fake_batch(urls, config, adapter):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                ydir = nas / "alice" / "2024"
+                ydir.mkdir(parents=True, exist_ok=True)
+                for url in urls:
+                    pid = url.rsplit("/", 1)[-1]
+                    (ydir / f"{pid}_a.jpg").write_bytes(b"data")
+                return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+            raise RuntimeError("gallery-dl exploded")
+
+        with patch("src.repair._run_batch", side_effect=fake_batch):
+            with pytest.raises(RuntimeError):
+                repair_missing(config, registry)
+
+        # The crash skipped _reconcile_artist AND the end-of-run refresh
+        # (rows_recovered never counted), but chunk 1's five recoveries are
+        # still folded into the stored summary.
+        summary = json.loads(db.get_state("integrity:last_check"))
+        assert summary["missing"] == 1
+        assert summary["by_artist"] == {str(artist.id): 1}
+        # Reconcile never ran: no row deletions despite the crash.
+        assert len(db.get_all_file_rows()) == 6

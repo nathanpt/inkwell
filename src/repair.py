@@ -10,6 +10,7 @@ import re
 import subprocess
 import time
 from dataclasses import asdict, dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 from src import db
@@ -224,6 +225,39 @@ def _wait_for_rate_window(site: str, config: Config) -> None:
     time.sleep(window)
 
 
+def _patch_stored_summary(recovered: list[MissingRow]) -> None:
+    """Fold rows already recovered this run into the stored integrity summary.
+
+    ``integrity:last_check`` normally rewrites only when ``check_integrity``
+    walks the NAS (repair start, repair end). Patching it per chunk makes the
+    Artists page Missing % reconcile progressively — and keeps every landed
+    chunk accounted even if the run dies before the end-of-run refresh.
+    Conservative by design: only exact-path recoveries (the file sits at its
+    canonical ``nas/{handle}/{filename}`` spot) are folded in; renamed-dir
+    relocations and purges wait for the authoritative end-of-run walk.
+    """
+    if not recovered:
+        return
+    raw = db.get_state("integrity:last_check")
+    if not raw:
+        return
+    try:
+        summary = json.loads(raw)
+    except ValueError:
+        logger.warning("Stored integrity summary unreadable; skipping live patch")
+        return
+    n = len(recovered)
+    summary["ok"] = summary.get("ok", 0) + n
+    summary["missing"] = max(0, summary.get("missing", 0) - n)
+    by_artist = summary.get("by_artist")
+    if isinstance(by_artist, dict):
+        for r in recovered:
+            key = str(r.artist_id)
+            by_artist[key] = max(0, by_artist.get(key, 0) - 1)
+    summary["timestamp"] = datetime.now().isoformat(timespec="seconds")
+    db.set_state("integrity:last_check", json.dumps(summary))
+
+
 def repair_missing(
     config: Config, registry: SiteRegistry, max_posts: int | None = None,
     artist_id: int | None = None,
@@ -415,6 +449,16 @@ def repair_missing(
                         f"{handle} chunk {ci + 1}/{len(chunk_list)}: {len(urls)} post(s) "
                         f"in {dt:.1f}s (rc={proc.returncode}, {len(chunk_paths)} file(s) downloaded)",
                     )
+                    # Progressive reconciliation: fold rows whose loose file
+                    # just landed into the stored summary now, so the Artists
+                    # page Missing % ticks down per chunk (and survives a
+                    # crash mid-run) instead of waiting for the end-of-run
+                    # refresh. Exact-path matches only; relocated/renamed
+                    # recoveries stay for the authoritative end refresh.
+                    _patch_stored_summary([
+                        r for (_, _, prows) in chunk for r in prows
+                        if (nas_path / r.handle / r.filename).exists()
+                    ])
                     break
                 if site_aborted:
                     break

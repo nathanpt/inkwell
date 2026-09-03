@@ -95,9 +95,11 @@ pyproject.toml           Dependencies (uv)
   under a renamed-author dir back into the canonical `nas/{handle}/{year}/`. Sites flagged
   `auth_valid:<site> == "0"` are skipped before any fetch, and a chunk that 429s waits out the
   rate window (via `_wait_for_unpause`) before its retry. An optional `artist_id` scopes a run
-  to one artist (the Artists-page per-row Repair button); a run that changes rows re-runs
-  `check_integrity` so the stored `integrity:last_check` summary (Artists page Missing %)
-  reflects post-repair state.
+  to one artist (the Artists-page per-row Repair button); each chunk's exact-path recoveries
+  fold into the stored `integrity:last_check` summary immediately (`_patch_stored_summary` —
+  progressive reconciliation that also survives a mid-run crash), and a run that changes rows
+  ends with an authoritative full `check_integrity` walk (Artists page Missing % reflects
+  post-repair state).
 - **Rate limiter (`src/rate_limiter.py`):** per-site `cooldown_multiplier` (×`multiplier_step` per
   hit, capped at `max_multiplier`, decays by `decay_rate` per success). A site is "paused" at
   `pause_threshold`; the pause is **time-bounded** by `pause_seconds` since the last hit, so it

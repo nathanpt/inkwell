@@ -17,7 +17,7 @@
 
 ## Confirmed working surfaces
 
-- **Tests:** `.venv/bin/python -m pytest tests/ -q` → **218 passed** (observed 2026-09-03, ~1.3s; includes the `streamlit.testing.v1.AppTest` UI tests in `tests/test_artists_ui.py`). Local venv runs Python 3.14.4; production image is `python:3.12-slim` (Dockerfile).
+- **Tests:** `.venv/bin/python -m pytest tests/ -q` → **220 passed** (observed 2026-09-03, ~1.4s; includes the `streamlit.testing.v1.AppTest` UI tests in `tests/test_artists_ui.py`). Local venv runs Python 3.14.4; production image is `python:3.12-slim` (Dockerfile).
 - **Entry point:** `streamlit run src/app.py` (compose `CMD`). `main()` → `bootstrap()` → scheduler setup → dashboard render. See `src/app.py`.
 - **Schema:** SQLite, `PRAGMA user_version = 6`. Migrations: v2→v3 added the `files` table; v3→v4 added `idx_files_downloaded`; v4→v5 deduped `(artist_id, filename)` rows and enforced uniqueness; v5→v6 canonicalized x.com artist `source_url`s to `…/media?filter=photo`. See `src/db.py`, `src/bootstrap.py`.
 - **Download engine:** `gallery-dl` invoked as subprocess from `src/downloader.py`; one artist at a time, per-artist job lock, directory-diff metrics. gallery-dl stderr is mirrored to the `logs` table (`source='gallery-dl'`), and a download timeout re-raises as a failed job (`timed out after Ns`, not a masked exit code).
@@ -25,7 +25,7 @@
 - **Gallery tab:** `src/sections/gallery.py` + `src/gallery_media.py`. Grid is sorted post-chronologically by the numeric post ID in the filename basename (X snowflake / Pixiv illust id / DeviantArt deviation id), asc/desc driven in SQL via `db.get_recent_files(order=...)`.
 - **Auto-zip:** `src/zipper.py`, triggered post-job and retroactively from Settings.
 - **Scheduling:** APScheduler via `src/scheduler.py`; cron from `config.toml`.
-- **Repair & integrity:** `src/integrity.py` reports missing files; `src/repair.py` re-downloads them via per-post gallery-dl URLs and reconciles rows (`_reconcile_artist`: exact basename match + numeric-post-id prefix). Repair now parses gallery-dl PipeOutput stdout (`_downloaded_paths`), relocates files written under a renamed-author dir back into `nas/{handle}/{year}/` (`_relocate_renamed`), and logs per-chunk file counts, a stderr-tail WARNING on unclassified non-zero exits, and a rename hint when 0 rows recover despite gallery-dl success. `repair_missing` takes an optional `artist_id` that scopes the run to one artist (the Artists-page per-row **Repair** button; scheduled/Settings runs stay global), and after a run that changes rows it re-runs `check_integrity` so the stored `integrity:last_check` summary (Artists page Missing %) reflects post-repair state.
+- **Repair & integrity:** `src/integrity.py` reports missing files; `src/repair.py` re-downloads them via per-post gallery-dl URLs and reconciles rows (`_reconcile_artist`: exact basename match + numeric-post-id prefix). Repair parses gallery-dl PipeOutput stdout (`_downloaded_paths`), relocates files written under a renamed-author dir back into `nas/{handle}/{year}/` (`_relocate_renamed`), and logs per-chunk file counts, a stderr-tail WARNING on unclassified non-zero exits, and a rename hint when 0 rows recover despite gallery-dl success. `repair_missing` takes an optional `artist_id` that scopes the run to one artist (the Artists-page per-row **Repair** button; scheduled/Settings runs stay global). The stored `integrity:last_check` summary (Artists page Missing %) reconciles progressively — each chunk's exact-path recoveries are folded in immediately (`_patch_stored_summary`) — and a run that changes rows ends with an authoritative full `check_integrity` walk.
 - **Logs tab + export:** `src/sections/logs.py` renders the Logs tab; "Export Logs" downloads the filtered entries (level/source/limit) as plain text via `_format_export` (newest-first, `job_id`/`artist_id` inline when present).
 - **Rate limiting:** `src/rate_limiter.py` tracks a per-site backoff multiplier; a site "pauses" at `pause_threshold`, but the pause is **time-bounded** by `pause_seconds` (default 900s) since the last hit, so it auto-clears once the upstream window passes. Repair (`src/repair.py`) *waits* for un-pause via `_wait_for_unpause`; the downloader skips (the scheduler retries).
 
@@ -54,7 +54,7 @@ Each item is sourced; none is invented.
 
 ## Verification status
 
-- **Passing:** `pytest` — 218 passed (full suite, observed this assessment).
+- **Passing:** `pytest` — 220 passed (full suite, observed this assessment).
 - **Not verified in CI:** tests are not part of `build.yml`; a regression can ship to `main` green-image but red-tests.
 - **Not run this assessment:** the Streamlit app itself (not launched here), Docker build, gallery-dl subprocess (requires credentials + NAS).
 

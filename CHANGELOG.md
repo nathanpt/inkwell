@@ -26,12 +26,13 @@ history predating this file lives in the Git log.
 - **Artists table: per-artist Repair button.** A fourth row action (Download |
   Repair | Remove | Delete Files) runs `repair_missing` scoped to just that
   artist via a new `artist_id` parameter — only the chosen artist's missing
-  files are re-fetched; scheduled and Settings-driven repairs stay global. A
-  repair run that changes rows (recovered / updated / purged) now re-runs the
-  integrity check afterwards, so the stored `integrity:last_check` summary —
-  and the Artists page Missing % it feeds — reflects post-repair state instead
-  of the pre-repair snapshot. The button disables itself while any repair is
-  running.
+  files are re-fetched; scheduled and Settings-driven repairs stay global. The
+  button disables itself while any repair is running. The stored
+  `integrity:last_check` summary — and the Artists page Missing % it feeds —
+  now reconciles progressively: each chunk's exact-path recoveries fold into
+  the summary immediately, and a run that changes rows (recovered / updated /
+  purged) ends with an authoritative full integrity walk, so the number
+  reflects post-repair state even after a rate-limit abort or a mid-run crash.
 
 - **Repair purges rows confirmed removed upstream.** gallery-dl stderr is now
   scanned per chunk for positive not-found evidence (404 / "not found" /
