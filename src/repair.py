@@ -225,13 +225,16 @@ def _wait_for_rate_window(site: str, config: Config) -> None:
 
 
 def repair_missing(
-    config: Config, registry: SiteRegistry, max_posts: int | None = None
+    config: Config, registry: SiteRegistry, max_posts: int | None = None,
+    artist_id: int | None = None,
 ) -> RepairResult:
     """Re-download missing files via per-post gallery-dl URLs and reconcile rows.
 
     Runs in a background thread; the connection-per-operation db helpers are
     thread-safe by design. ``max_posts`` caps the total posts attempted this run
     (scheduled auto-repair passes a cap; the manual UI action is uncapped).
+    ``artist_id`` scopes the run to one artist (Artists-page per-row Repair);
+    the scheduled and Settings paths leave it None.
 
     Rate-limit and auth failures are handled per site: a site that exhausts its
     retries is skipped for the rest of the run while remaining sites continue.
@@ -249,6 +252,8 @@ def repair_missing(
         result.sibling_entries_recovered = merged
 
         report = check_integrity(config)
+        if artist_id is not None:
+            report.missing = [r for r in report.missing if r.artist_id == artist_id]
         result.missing_before = len(report.missing)
 
         if not report.missing:
@@ -445,6 +450,11 @@ def repair_missing(
                 )
     finally:
         db.set_state("repair:running", "0")
+
+    # Rows changed this run: refresh the stored summary so the Artists page
+    # Missing % reflects the post-repair state, not the pre-repair snapshot.
+    if result.rows_recovered or result.rows_updated or result.rows_deleted:
+        check_integrity(config)
 
     _store_result(result, run_start)
     return result

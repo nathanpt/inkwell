@@ -11,6 +11,7 @@ import streamlit as st
 from src import db
 from src.downloader import download_artist
 from src.models import Artist
+from src.repair import repair_missing
 from src.url_validator import validate_url, get_registry
 
 logger = logging.getLogger(__name__)
@@ -24,8 +25,8 @@ SITE_LABELS = {
 
 PAGE_SIZE = 10
 
-# Artist | Files | Missing | Last scan | Download | Remove | Delete Files
-TABLE_COLS = [2.6, 1.2, 1.2, 1.4, 1.0, 1.0, 1.2]
+# Artist | Files | Missing | Last scan | Download | Repair | Remove | Delete Files
+TABLE_COLS = [2.4, 1.1, 1.1, 1.4, 0.95, 0.95, 0.95, 1.15]
 
 
 def _run_download(artist):
@@ -40,6 +41,25 @@ def _run_download(artist):
             logger.exception("Background download thread crashed: %s", e)
             try:
                 db.insert_log("ERROR", "downloader", f"Thread crashed: {e}")
+            except Exception:
+                pass
+
+    t = threading.Thread(target=wrapper, daemon=True)
+    t.start()
+
+
+def _run_repair(artist):
+    """Run targeted repair for a single artist in a background thread."""
+    config = st.session_state.config
+    registry = get_registry()
+
+    def wrapper():
+        try:
+            repair_missing(config, registry, artist_id=artist.id)
+        except Exception as e:
+            logger.exception("Background repair thread crashed: %s", e)
+            try:
+                db.insert_log("ERROR", "repair", f"Thread crashed: {e}")
             except Exception:
                 pass
 
@@ -172,6 +192,8 @@ def render_artists():
         _sort_header("scan", "Last scan")
     st.divider()
 
+    repair_running = db.get_state("repair:running") == "1"
+
     for i, artist in enumerate(page_artists):
         if i:
             st.divider()
@@ -180,7 +202,7 @@ def render_artists():
         site_label = SITE_LABELS.get(artist.site, artist.site)
         count, size = disk_usage.get(artist.id, (0, 0))
 
-        col_info, col_files, col_missing, col_scan, col_dl, col_rm, col_del = st.columns(
+        col_info, col_files, col_missing, col_scan, col_dl, col_rep, col_rm, col_del = st.columns(
             TABLE_COLS, vertical_alignment="center"
         )
         with col_info:
@@ -195,6 +217,14 @@ def render_artists():
             if st.button("Download", key=f"dl_{artist.id}", use_container_width=True):
                 _run_download(artist)
                 st.info(f"Download started for {display}")
+        with col_rep:
+            if st.button(
+                "Repair", key=f"rep_{artist.id}", use_container_width=True,
+                disabled=repair_running,
+                help="Re-fetch this artist's missing files; purges rows whose posts are gone upstream.",
+            ):
+                _run_repair(artist)
+                st.info(f"Repair started for {display}")
         with col_rm:
             if st.button("Remove", key=f"rm_{artist.id}", use_container_width=True):
                 db.deactivate_artist(artist.id)

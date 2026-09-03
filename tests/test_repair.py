@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 from pathlib import Path
 from unittest.mock import patch
@@ -675,3 +676,84 @@ class TestRemovedUpstream:
         assert result.rows_removed_upstream == 0
         assert result.rows_deleted == 0
         assert len(db.get_all_file_rows()) == 1  # safeguard keeps the row
+
+
+class TestTargetedRepair:
+    """``artist_id`` scopes the run to one artist; mutating runs refresh the
+    stored integrity summary that feeds the Artists page Missing %."""
+
+    def test_targeted_scopes_to_artist(self, setup, monkeypatch):
+        config, registry, nas = setup
+        alice = _make_artist(handle="alice")
+        _insert_file(alice.id, "2024/111_a.jpg", "2024")
+        bob = _make_artist(handle="bob")
+        _insert_file(bob.id, "2024/222_b.jpg", "2024")
+
+        monkeypatch.setattr("src.repair.time.sleep", lambda *_: None)
+
+        seen_urls = []
+
+        def fake_batch(urls, config, adapter):
+            seen_urls.extend(urls)
+            for url in urls:
+                handle = url.split("/")[3]
+                pid = url.rsplit("/", 1)[-1]
+                ydir = nas / handle / "2024"
+                ydir.mkdir(parents=True, exist_ok=True)
+                (ydir / f"{pid}_a.jpg").write_bytes(b"data")
+            return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+        with patch("src.repair._run_batch", side_effect=fake_batch):
+            result = repair_missing(config, registry, artist_id=alice.id)
+
+        assert result.rows_recovered == 1
+        assert seen_urls and all("/alice/" in u for u in seen_urls)
+        filenames = {r["filename"] for r in db.get_all_file_rows()}
+        assert filenames == {"2024/111_a.jpg", "2024/222_b.jpg"}  # bob untouched
+
+    def test_targeted_no_missing_returns_early(self, setup, monkeypatch):
+        config, registry, nas = setup
+        alice = _make_artist(handle="alice")
+        _insert_file(alice.id, "2024/111_a.jpg", "2024")
+        ydir = nas / "alice" / "2024"
+        ydir.mkdir(parents=True)
+        (ydir / "111_a.jpg").write_bytes(b"data")
+        bob = _make_artist(handle="bob")
+        _insert_file(bob.id, "2024/222_b.jpg", "2024")
+
+        monkeypatch.setattr("src.repair.time.sleep", lambda *_: None)
+
+        with patch("src.repair._run_batch") as mock_batch:
+            result = repair_missing(config, registry, artist_id=alice.id)
+
+        mock_batch.assert_not_called()
+        assert result.missing_before == 0
+        filenames = {r["filename"] for r in db.get_all_file_rows()}
+        assert filenames == {"2024/111_a.jpg", "2024/222_b.jpg"}
+
+    def test_summary_refreshed_after_purge(self, setup, monkeypatch):
+        config, registry, nas = setup
+        artist = _make_artist()
+        _insert_file(artist.id, "2024/111_a.jpg", "2024")  # present on disk
+        _insert_file(artist.id, "2024/222_b.jpg", "2024")  # missing -> 404 upstream
+        ydir = nas / "alice" / "2024"
+        ydir.mkdir(parents=True)
+        (ydir / "111_a.jpg").write_bytes(b"data")
+
+        monkeypatch.setattr("src.repair.time.sleep", lambda *_: None)
+
+        def fake_batch(urls, config, adapter):
+            stderr = "\n".join(
+                f"[error][twitter] https://x.com/alice/status/{url.rsplit('/', 1)[-1]}: "
+                f"404 Not Found ('Not Found')"
+                for url in urls
+            )
+            return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr=stderr)
+
+        with patch("src.repair._run_batch", side_effect=fake_batch):
+            result = repair_missing(config, registry)
+
+        assert result.rows_deleted == 1  # purge happened -> refresh must have too
+        summary = json.loads(db.get_state("integrity:last_check"))
+        assert summary["total"] == 1
+        assert summary["by_artist"] == {str(artist.id): 0}

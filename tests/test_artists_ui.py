@@ -180,3 +180,11 @@ class TestArtistsTable:
 
         at.button(key="artist_sort_scan").click().run()
         assert handles() == ["abc", "zed", "mid"]  # Jan, Feb, Mar
+
+    def test_repair_button_present(self, tmp_path):
+        db_path = _setup_db(tmp_path)
+        aid = _seed_artist_with_files()
+
+        at = _make_at(tmp_path, db_path)
+
+        assert at.button(key=f"rep_{aid}") is not None
