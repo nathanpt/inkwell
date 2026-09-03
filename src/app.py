@@ -41,6 +41,40 @@ def _check_password(password: str) -> bool:
         password.encode(), config.auth.password_hash.encode()
     )
 
+def _inject_compact_css() -> None:
+    """Tighten Streamlit's default vertical rhythm.
+
+    Stock spacing (1rem block gaps, ~6rem top padding, padded buttons) suits a
+    marketing page, not a dense control surface: at 1080p the Artists table
+    showed only a few rows before scrolling. Scoped to elements this app uses;
+    harmless where a selector no longer matches a Streamlit patch.
+    """
+    st.markdown(
+        """
+        <style>
+            .block-container { padding-top: 1.1rem !important; padding-bottom: 1rem !important; }
+            div[data-testid="stVerticalBlock"], div[data-testid="stBlockContainer"] {
+                gap: 0.45rem !important;
+            }
+            h1 { padding-bottom: 0.2rem !important; margin-bottom: 0.4rem !important; }
+            [role="tab"] { padding-top: 0.45rem !important; padding-bottom: 0.45rem !important; }
+            .stButton > button, button[data-testid="stBaseButton-secondary"] {
+                padding: 0.18rem 0.55rem !important;
+                font-size: 0.8rem !important;
+                min-height: 1.7rem !important;
+                line-height: 1.25 !important;
+            }
+            div[data-testid="stForm"] { padding: 0.6rem 0.9rem !important; }
+            .stTextInput input { padding: 0.3rem 0.6rem !important; }
+            .stTextInput label { margin-bottom: 0.15rem !important; font-size: 0.82rem !important; }
+            hr { margin: 0.25rem 0 !important; }
+            .stMarkdown p { margin-bottom: 0.1rem !important; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 
 def _render_login():
     st.title("Inkwell")
@@ -103,6 +137,7 @@ def main():
     # Must be the first st command; wide layout gives tabular surfaces
     # (Artists table, job history) room that the centered ~734px column starves.
     st.set_page_config(page_title="Inkwell", layout="wide")
+    _inject_compact_css()
     _init_session_state()
     if not st.session_state.authenticated:
         _render_login()

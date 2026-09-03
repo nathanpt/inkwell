@@ -71,34 +71,36 @@ def render_artists():
     config = st.session_state.config
     registry = get_registry()
 
-    # Add artist form — input and button on the same row
-    with st.form("add_artist"):
-        col_input, col_btn = st.columns([4, 1], vertical_alignment="bottom")
-        with col_input:
-            url = st.text_input(
-                "Artist URL",
-                placeholder="https://x.com/handle/media?filter=photo, https://www.pixiv.net/users/123, https://www.deviantart.com/name",
-            )
-        with col_btn:
-            submitted = st.form_submit_button("Add Artist", use_container_width=True)
-        if submitted and url:
-            try:
-                handle, normalized_url, adapter = validate_url(url)
-                handle = adapter.resolve_handle(handle)
-                existing = db.get_artist_by_url(normalized_url)
-                if existing and existing.is_active:
-                    st.error(f"Artist {adapter.get_display_handle(Artist(handle=handle))} is already tracked")
-                elif existing and not existing.is_active:
-                    db.reactivate_artist(existing.id)
-                    st.success(f"Reactivated {adapter.get_display_handle(Artist(handle=handle))}")
-                    st.rerun()
-                else:
-                    artist = Artist(handle=handle, site=adapter.name, source_url=normalized_url)
-                    db.insert_artist(artist)
-                    st.success(f"Added {adapter.get_display_handle(Artist(handle=handle))} ({SITE_LABELS.get(adapter.name, adapter.name)})")
-                    st.rerun()
-            except ValueError as e:
-                st.error(str(e))
+    # Add artist form — collapsed by default: it's used once per artist, while
+    # the table below is the page's daily surface.
+    with st.expander("Add artist"):
+        with st.form("add_artist"):
+            col_input, col_btn = st.columns([4, 1], vertical_alignment="bottom")
+            with col_input:
+                url = st.text_input(
+                    "Artist URL",
+                    placeholder="https://x.com/handle/media?filter=photo, https://www.pixiv.net/users/123, https://www.deviantart.com/name",
+                )
+            with col_btn:
+                submitted = st.form_submit_button("Add Artist", use_container_width=True)
+            if submitted and url:
+                try:
+                    handle, normalized_url, adapter = validate_url(url)
+                    handle = adapter.resolve_handle(handle)
+                    existing = db.get_artist_by_url(normalized_url)
+                    if existing and existing.is_active:
+                        st.error(f"Artist {adapter.get_display_handle(Artist(handle=handle))} is already tracked")
+                    elif existing and not existing.is_active:
+                        db.reactivate_artist(existing.id)
+                        st.success(f"Reactivated {adapter.get_display_handle(Artist(handle=handle))}")
+                        st.rerun()
+                    else:
+                        artist = Artist(handle=handle, site=adapter.name, source_url=normalized_url)
+                        db.insert_artist(artist)
+                        st.success(f"Added {adapter.get_display_handle(Artist(handle=handle))} ({SITE_LABELS.get(adapter.name, adapter.name)})")
+                        st.rerun()
+                except ValueError as e:
+                    st.error(str(e))
 
     # Artist list
     artists = db.get_active_artists()
@@ -116,13 +118,22 @@ def render_artists():
         except ValueError:
             by_artist = {}
 
-    # Total summary
     total_files = sum(disk_usage.get(a.id, (0, 0))[0] for a in artists)
     total_bytes = sum(disk_usage.get(a.id, (0, 0))[1] for a in artists)
-    st.caption(f"Total: {total_files:,} files · {_format_bytes(total_bytes)} across {len(artists)} artist(s)")
-
-    # Search filter
-    search = st.text_input("Search artists", placeholder="Filter by name or site...", key="artist_search")
+    # Total summary + search share one row — as two full-width blocks they
+    # pushed the first artist row below the fold.
+    col_search, col_total = st.columns([3, 2])
+    with col_search:
+        search = st.text_input(
+            "Search artists", placeholder="Filter by name or site...",
+            key="artist_search", label_visibility="collapsed",
+        )
+    with col_total:
+        st.markdown(
+            f"<div style='text-align:right; color:#808495; padding-top:0.35rem'>"
+            f"Total: {total_files:,} files · {_format_bytes(total_bytes)} across {len(artists)} artist(s)</div>",
+            unsafe_allow_html=True,
+        )
     if search:
         search_lower = search.lower()
         artists = [a for a in artists if search_lower in a.handle.lower() or search_lower in SITE_LABELS.get(a.site, a.site).lower()]
@@ -159,27 +170,6 @@ def render_artists():
     page_start = page * PAGE_SIZE
     page_end = page_start + PAGE_SIZE
     page_artists = artists[page_start:page_end]
-
-    if total_pages > 1:
-        col_first, col_prev, col_info, col_next, col_last = st.columns([1, 1, 2, 1, 1])
-        with col_first:
-            if st.button("First", disabled=(page == 0), key="artist_page_first"):
-                st.session_state.artist_page = 0
-                st.rerun()
-        with col_prev:
-            if st.button("Prev", disabled=(page == 0), key="artist_page_prev"):
-                st.session_state.artist_page = page - 1
-                st.rerun()
-        with col_info:
-            st.markdown(f"<div style='text-align:center'>Page {page + 1} of {total_pages}</div>", unsafe_allow_html=True)
-        with col_next:
-            if st.button("Next", disabled=(page >= total_pages - 1), key="artist_page_next"):
-                st.session_state.artist_page = page + 1
-                st.rerun()
-        with col_last:
-            if st.button("Last", disabled=(page >= total_pages - 1), key="artist_page_last"):
-                st.session_state.artist_page = total_pages - 1
-                st.rerun()
 
     hdr = st.columns(TABLE_COLS)
     with hdr[0]:
@@ -237,6 +227,29 @@ def render_artists():
                 if artist_dir.exists():
                     shutil.rmtree(artist_dir)
                 st.success(f"Removed {display} and deleted files")
+                st.rerun()
+
+    st.divider()
+
+    if total_pages > 1:
+        col_first, col_prev, col_info, col_next, col_last = st.columns([1, 1, 2, 1, 1])
+        with col_first:
+            if st.button("First", disabled=(page == 0), key="artist_page_first"):
+                st.session_state.artist_page = 0
+                st.rerun()
+        with col_prev:
+            if st.button("Prev", disabled=(page == 0), key="artist_page_prev"):
+                st.session_state.artist_page = page - 1
+                st.rerun()
+        with col_info:
+            st.markdown(f"<div style='text-align:center'>Page {page + 1} of {total_pages}</div>", unsafe_allow_html=True)
+        with col_next:
+            if st.button("Next", disabled=(page >= total_pages - 1), key="artist_page_next"):
+                st.session_state.artist_page = page + 1
+                st.rerun()
+        with col_last:
+            if st.button("Last", disabled=(page >= total_pages - 1), key="artist_page_last"):
+                st.session_state.artist_page = total_pages - 1
                 st.rerun()
 
 

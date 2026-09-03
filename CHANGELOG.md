@@ -57,6 +57,17 @@ history predating this file lives in the Git log.
   `gallery-dl timed out after Ns`. (`c970c0f`)
 
 ### Changed
+- **Compact UI density: the full Artists page fits one screen.** A global
+  compact stylesheet (`_inject_compact_css` in `src/app.py`) tightens
+  Streamlit's stock vertical rhythm — block gaps, page top padding, button
+  padding/font, input padding, divider margins — which previously left only
+  2–4 artist rows visible before scrolling. The Artists page is also
+  restructured: the add-artist form is a collapsed expander (it's used once
+  per artist, the table is the daily surface), Search and the Total summary
+  share one row, and pagination moved below the table. At 1440×810 all 10
+  rows of page 1 plus pagination now fit without scrolling. Adds
+  `scripts/dev_ui.py` to boot the app on a dev box with a scratch
+  config/DB/NAS (login bypassed) for visual iteration.
 - **gallery-dl stderr is mirrored to the `logs` table during downloads.** Each non-empty
   stderr line is persisted with `source='gallery-dl'`, level `INFO`, tagged with the
   running `job_id`/`artist_id`, so the Logs tab and Export Logs surface the real

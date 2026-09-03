@@ -56,7 +56,7 @@ Each item is sourced; none is invented.
 
 - **Passing:** `pytest` — 220 passed (full suite, observed this assessment).
 - **Not verified in CI:** tests are not part of `build.yml`; a regression can ship to `main` green-image but red-tests.
-- **Not run this assessment:** the Streamlit app itself (not launched here), Docker build, gallery-dl subprocess (requires credentials + NAS).
+- **Run this assessment:** the Streamlit app itself — booted headless via `scripts/dev_ui.py` (scratch config/DB/NAS under `/tmp/inkwell-ui`, login bypassed) and screenshotted with headless Chromium; Artists-page density verified at 1920×1080 and 1440×810 (10 rows + pagination per page, no clipping). Restart the process after `src/` edits — Streamlit does not hot-reload modules outside the main script's folder. **Not run:** Docker build, gallery-dl subprocess (requires credentials + NAS).
 
 ## Decisions, generators, and constraints
 
@@ -70,6 +70,6 @@ Each item is sourced; none is invented.
 
 ## Next useful checks
 
-- The Streamlit app can't boot in this dev env (`bootstrap()` → `load_config()` reads container paths `/app/config/config.toml` with a `/app/defaults/` fallback baked into the image), so UI/behavior smoke (gallery sort, Export Logs button, repair per-chunk logs / rename WARNING, rate-limit-wait on a paused site) must run on the production container, not this machine.
+- The Streamlit app boots locally for UI work via `scripts/dev_ui.py` (see Verification status), replacing the old "must smoke on the production container" constraint for pure-UI checks. Behavior smoke that needs real gallery-dl runs (per-chunk repair logs, rename WARNING, rate-limit-wait, gallery thumbnails over real media) still belongs on the production container.
 - Add a test step to `.github/workflows/build.yml` so regressions are caught before image push.
 - Reconcile `docs/DESIGN.md` §4.1/§10/§13/§14 with the current tree (or mark those sections as "see ROADMAP.md for live status").
